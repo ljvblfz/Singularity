@@ -1,0 +1,276 @@
+﻿<!--
+##############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+#   File:   Boot\Singldr\Makefile
+#
+#   Note:
+
+The components built by this project require knowledge of some
+of the data structures used by the managed kernel.  We handle
+this by building the kernel first and running it through native
+code generation (Bartok).  This generates halclass.h and
+halclass.inc, which contain structure layouts that the unmanaged
+C/C++ and assembly compilers can use.
+
+MSBuild is smart enough to handle this correctly.  Projects can
+build other projects, and can refer to specific targets within
+those projects.  So Kernel.proj and SINGLDR.proj contain
+references to each other.  The reference graph is acyclic,
+because references are really to tuples of (project, target),
+not just to (project).
+
+The result is that you get a clean, correct build, no matter
+what order you build the projects.
+
+-->
+
+<Project DefaultTarget="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\Paths.targets" />
+
+  <PropertyGroup>
+    <!--
+ Truncate PATH for 16-bit tools because if it is
+     too long it'll give an out-of-memory error.
+    -->
+    <CC16>PATH ; &amp; $(BUILDDIR)\cl16.exe</CC16>
+    <LINK16>PATH ; &amp; $(BUILDDIR)\link16.exe</LINK16>
+    <CC>$(BUILDDIR)\cl.exe /D_CRT_SECURE_NO_DEPRECATE</CC>
+    <AS>$(BUILDDIR)\ml.exe</AS>
+    <SDIZEPDB>$(BUILDDIR)\sdizepdb.exe</SDIZEPDB>
+    <PATH>$(SINGULARITY_PATH)</PATH>
+    <LIBDIR>..\..\windows\lib\</LIBDIR>
+  </PropertyGroup>
+
+  <Choose>
+    <When Condition="'$(Machine)'=='x86'">
+      <PropertyGroup>
+        <UNDUMP>undump</UNDUMP>
+        <UNDUMP_CL>$(CC)</UNDUMP_CL>
+        <UNDUMP_FLAGS>$(LINKFLAGS)</UNDUMP_FLAGS>
+      </PropertyGroup>
+      <ItemGroup>
+        <UndumpSource Include="undump.cpp"/>
+      </ItemGroup>
+      <ItemGroup>
+        <UndumpIncludes Include="$(BOOTDIR)\halclass.h"/>
+        <UndumpIncludes Include="include\minidump.h"/>
+        <UndumpIncludes Include="include\winctx.h"/>
+        <UndumpIncludes Include="include\printf.cpp"/>
+        <UndumpIncludes Include="debug.cpp"/>
+      </ItemGroup>
+    </When>
+  </Choose>
+
+  <PropertyGroup>
+    <MLINKFLAGS>/NOD /STACK:0x8000 /ONERROR:NOEXE /FAR /PACKC /NOLOGO</MLINKFLAGS>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SINGULARITY_MP)'=='true'">
+    <ASM_FLAGS>$(ASM_FLAGS) /DSINGULARITY_MP=1</ASM_FLAGS>
+    <CC_FLAGS>$(CC_FLAGS) /DSINGULARITY_MP=1</CC_FLAGS>
+  </PropertyGroup>
+
+  <Target Name="Build"
+          DependsOnTargets="LinkSingldr;CopySingldr"/>
+
+  <Target Name="Clean">
+    <Delete Files="$(BOOTDIR)\undump.exe;$(BOOTDIR)\undump.lst;$(BOOTDIR)\undump.map;$(BOOTDIR)\undump.pdb;$(BOOTDIR)\%(UndumpSource.filename).obj"/>
+  </Target>
+
+  <PropertyGroup>
+    <CC16FLAGS>/nologo /c /AT /G3 /Gs /Gd /Gf /Gy /W4 /WX</CC16FLAGS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <OBJ Include="$(BOOTDIR)\singldr0.obj"/>
+    <OBJ Include="$(BOOTDIR)\singldr.obj"/>
+    <OBJ Include="$(BOOTDIR)\pxe.obj"/>
+    <OBJ Include="$(BOOTDIR)\jolietdevice.obj"/>
+    <OBJ Include="$(BOOTDIR)\fatdevice.obj"/>
+    <OBJ Include="$(BOOTDIR)\usbdevice.obj"/>
+    <OBJ Include="$(BOOTDIR)\fnames.obj"/>
+    <OBJ Include="$(BOOTDIR)\inifile.obj"/>
+    <OBJ Include="$(BOOTDIR)\ulrem.obj"/>
+    <OBJ Include="$(BOOTDIR)\uldiv.obj"/>
+    <OBJ Include="$(BOOTDIR)\lmul.obj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <CppSource16 Include="FatDevice.cpp">
+      <Dependencies>..\Include\printf.cpp;debug.cpp;debug.h;fatdevice.h;fnames.h;fnames.cpp;bootdevice.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="jolietdevice.cpp">
+      <Dependencies>..\Include\printf.cpp;debug.cpp;debug.h;jolietdevice.h;fnames.h;fnames.cpp;bootdevice.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="usbdevice.cpp">
+      <Dependencies>..\Include\printf.cpp;debug.cpp;debug.h;usbdevice.h;fnames.h;fnames.cpp;bootdevice.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="inifile.cpp">
+      <Dependencies>inifile.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="fnames.cpp">
+      <Dependencies>fnames.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="pxe.cpp">
+      <Dependencies>..\Include\printf.cpp;debug.cpp;debug.h;pxe.h;fnames.h;fnames.cpp;bootdevice.h</Dependencies>
+    </CppSource16>
+
+    <CppSource16 Include="$(BOOTDIR)\singldr.cpp">
+      <Dependencies></Dependencies>
+    </CppSource16>
+
+  </ItemGroup>
+
+  <ItemGroup>
+    <SourceFilesToCopy Include="@(CppSource16)"/>
+    <SourceFilesToCopy Include="$(SINGULARITY_ROOT)\Boot\Include\*.*"/>
+    <SourceFilesToCopy Include="$(KERNEL_NATIVE_DIR)\halclass.h"/>
+    <SourceFilesToCopy Include="$(KERNEL_NATIVE_DIR)\halclass.inc"/>
+    <SourceFilesToCopy Include="*.h"/>
+    <SourceFilesToCopy Include="*.inc"/>
+  </ItemGroup>
+
+  <Target Name="CreateItems">
+    <CreateItem Include="$(BOOTDIR)\%(CppSource16.filename).obj">
+      <Output TaskParameter="Include" ItemName="__singldr_objs"/>
+    </CreateItem>
+    <CreateItem Include="$(BOOTDIR)\%(AssemblySource16.filename).obj">
+      <Output TaskParameter="Include" ItemName="__singldr_objs"/>
+    </CreateItem>
+    <CreateItem Include="$(BOOTDIR)\%(UndumpSource.filename).obj">
+      <Output TaskParameter="Include" ItemName="__undump_obj"/>
+    </CreateItem>
+  </Target>
+
+  <ItemGroup>
+    <__singldr_objs Include="$(BOOTDIR)\singldr0.obj"/>
+  </ItemGroup>
+
+  <Target Name="CopySourceFilesForCL16"
+          Inputs="@(SourceFilesToCopy)"
+          Outputs="$(BOOTDIR)\%(SourceFilesToCopy.filename)%(SourceFilesToCopy.extension)">
+    <Copy SourceFiles="@(SourceFilesToCopy)" DestinationFolder="$(BOOTDIR)" SkipUnchangedFiles="true"/>
+  </Target>
+
+  <Target Name="CompileCppSource16"
+          Inputs="%(CppSource16.identity);%(CppSource16.Dependencies)"
+          Outputs="$(BOOTDIR)\%(CppSource16.filename).obj"
+          DependsOnTargets="BuildHalclass;PreprocessSingldrCpp;CopySourceFilesForCL16">
+    <!--
+    CL16 is sensitive to long paths.  It will fail with the
+    cryptic message "Out of memory" if it isn't happy with the
+    path lengths.  To work around this, we copy the source code
+    to the object directory, trim the PATH to the smallest set
+    that we need, and invoke CL16 in the object directory.
+    -->
+    <Exec WorkingDirectory="$(BOOTDIR)"
+      Command="$(CC16) $(CC16FLAGS) /DSINGULARITY_LOADER /Fo%(CppSource16.filename).obj /Fa%(CppSource16.filename).lst /I. %(CppSource16.filename)%(CppSource16.extension)"/>
+  </Target>
+
+  <ItemGroup>
+    <Singldr16Sources Include="singldr.cpp;..\Include\printf.cpp;debug.cpp;debug.h;pxe.h;singldr.h;fatdevice.h;jolietdevice.h;fnames.h;usbdevice.h;bootdevice.h;$(KERNEL_NATIVE_DIR)\halclass.h"/>
+  </ItemGroup>
+
+  <Target Name="PreprocessSingldrCpp"
+          Inputs="@(Singldr16Sources)"
+          Outputs="$(BOOTDIR)\singldr.cpp"
+          DependsOnTargets="BuildHalclass">
+    <Message Text="Preprocessing singldr.cpp using 32-bit C++ compiler"/>
+    <Exec Command="$(CC) $(CC_FLAGS) /DSINGULARITY_LOADER /nologo /E /I..\include /I$(KERNEL_NATIVE_DIR) singldr.cpp &gt; $(BOOTDIR)\singldr.cpp"/>
+  </Target>
+
+
+  <Target Name="CompileSingldr0"
+          Inputs="singldr0.asm;$(BOOTDIR)\undump.asb;$(KERNEL_NATIVE_DIR)\halclass.inc"
+          Outputs="$(BOOTDIR)\singldr0.obj"
+          DependsOnTargets="CreateDirs;BuildHalclass;CreateUndumpAsb">
+    <Exec Command="$(AS) $(ASM_FLAGS) /DSINGULARITY_LOADER /nologo /c /omf /Cp /AT /I$(BOOTDIR) /I$(KERNEL_NATIVE_DIR) /Fl$(BOOTDIR)\singldr0.lst /Fo$(BOOTDIR)\singldr0.obj singldr0.asm"/>
+  </Target>
+
+  <ItemGroup>
+    <AssemblySource16 Include="ulrem.asm"/>
+    <AssemblySource16 Include="lmul.asm"/>
+    <AssemblySource16 Include="uldiv.asm"/>
+  </ItemGroup>
+
+  <Target Name="CompileAssemblySource16"
+          Inputs="@(AssemblySource16)"
+          Outputs="$(BOOTDIR)\%(AssemblySource16.filename).obj"
+          DependsOnTargets="CreateDirs"
+          >
+    <Exec Command="$(AS) /nologo /c /omf /AT /Fo$(BOOTDIR)\%(AssemblySource16.filename).obj %(AssemblySource16.identity)"/>
+  </Target>
+
+
+  <Target Name="CreateDirs">
+    <MakeDir Directories="$(BOOTDIR)"/>
+  </Target>
+
+  <!-- ============================ UNDUMP =============================================== -->
+
+  <Target Name="CompileUndumpSources"
+          Inputs="@(UndumpSource);@(UndumpIncludes)"
+          Outputs="$(BOOTDIR)\%(UndumpSource.filename).obj"
+          DependsOnTargets="CreateDirs;BuildHalclass">
+
+    <Exec Condition="'%(UndumpSource.extension)' == '.cpp'"
+          Command="$(UNDUMP_CL) $(CC_FLAGS) /nologo /c /Oxs /Oi /GFy /Gd /Gy /W3 /Zi /Zl /GS- /I..\include /I$(KERNEL_NATIVE_DIR) /FAsc /Fa$(BOOTDIR)\undump.lst /Fd$(BOOTDIR)\undump.pdb /Fo$(BOOTDIR)\undump.obj undump.cpp"/>
+  </Target>
+
+  <Target Name="LinkUndump"
+          Outputs="$(BOOTDIR)\undump.exe"
+          Inputs="@(__undump_obj)"
+          DependsOnTargets="CreateDirs;CreateItems;CompileUndumpSources">
+    <!-- # NB Swapped /DEBUGTYPE:CV,FIXUP for $(LINKDFLAGS) which does not have FIXUP -->
+    <Message Text="UndumpSource: %(UndumpSource.identity)"/>
+    <Exec Command="$(LINK) /machine:$(Machine) $(UNDUMP_FLAGS) /out:$(BOOTDIR)\undump.exe @(__undump_obj,' ') /pdb:$(BOOTDIR)\undump.pdb /map:$(BOOTDIR)\undump.map /driver /align:0x200 /base:0x60000 /fixed /entry:$(UNDUMP) /subsystem:native /ignore:4078 /merge:.rdata=.data /merge:.bss=.data /merge:.data=.text"/>
+    <Exec Condition="'$(EnableSdize)'=='true'"
+      ContinueOnError="true" Command="$(SDIZEPDB) /t:$(BOOTDIR)\undump.txt $(BOOTDIR)\undump.pdb"/>
+  </Target>
+
+
+  <Target Name="CreateUndumpAsb"
+          Outputs="$(BOOTDIR)\undump.asb"
+          Inputs="$(BOOTDIR)\undump.exe"
+          DependsOnTargets="LinkUndump">
+    <Exec Command="$(BUILDDIR)\mkasm $(MKASM_FLAGS) /r:undump /o:$(BOOTDIR)\undump.asb $(BOOTDIR)\undump.exe"/>
+  </Target>
+
+  <!-- ================================================================= -->
+
+
+  <Target Name="CopySingldr"
+          Outputs="$(BOOTDIR)\singldr"
+          Inputs="$(BOOTDIR)\singldr.com"
+          DependsOnTargets="CreateDirs;LinkSingldr">
+    <Copy SourceFiles="$(BOOTDIR)\singldr.com" DestinationFiles="$(BOOTDIR)\singldr" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="LinkSingldr"
+          Outputs="$(BOOTDIR)\singldr.com"
+          Inputs="@(__singldr_objs)"
+          DependsOnTargets="CreateDirs;CreateItems;CompileSingldr0;CompileAssemblySource16;CompileCppSource16">
+    <!--
+    NB LINK16 refuses to handle file2s when BOOTDIR length is too long so
+    we change to the object directory before it is invoked
+    -->
+    <Exec WorkingDirectory="$(BOOTDIR)"
+      Command="$(LINK16) /nologo /tiny /batch @(__singldr_objs->'%(filename)%(extension)',' '),singldr.com,singldr.map,,$(MLINKFLAGS);"/>
+  </Target>
+
+
+  <Target Name="BuildHalclass">
+    <Message Text="Building kernel (for halclass.h)"/>
+    <MSBuild Projects="$(SINGULARITY_ROOT)\Kernel\Kernel.proj" Targets="CompileKernelObj"/>
+  </Target>
+
+</Project>

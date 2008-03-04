@@ -1,0 +1,877 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\Tests\BenchmarkProxy\BenchmarkJournalet.sg
+//
+//  Note:   
+//
+#define VERSION_2
+using System;
+using System.Threading;
+using System.Collections;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Resiliency;
+
+namespace Microsoft.Singularity.Services.Benchmark
+{
+    internal enum MessageType : uint
+    {
+        Unknown,
+        GetCycleCount,
+        CycleCount,
+        Null,
+        One,
+        Two,
+        Three,
+        Four,
+        Five,
+        Six,
+        Seven,
+        Eight,
+        Nine,
+        EndOfBenchmark,
+        AckNull,
+        AckOne,
+        AckTwo,
+        AckThree,
+        AckFour,
+        AckFive,
+        AckSix,
+        AckSeven,
+        AckEight,
+        AckNine,
+        AckEnd,
+    }
+
+#if VERSION_2
+    internal class BenchmarkJournalet : Journalet2
+#else
+    internal class BenchmarkJournalet : Journalet
+#endif
+    {
+        private Log!                                incoming;
+        private Log!                                outgoing;
+        private Object!                             initMonitor;
+        private Object!                             benchmarkMonitor;
+        private TRef<BenchmarkContract.Imp:Start>   initImp;
+        private TRef<BenchmarkContract.Imp:Ready>   benchmarkImp;
+        private TRef<BenchmarkContract.Exp:Ready>   benchmarkExp;
+#if VERSION_2
+        private TRef<BenchmarkContract.Exp:Start>!  initExp;
+
+        internal BenchmarkJournalet([Claims]ServiceContract.Exp:Start! ep)
+            : base()
+        {
+            BenchmarkContract.Exp:Start exp;
+            exp = ep as BenchmarkContract.Exp:Start;
+            if (exp == null) {
+                throw new ArgumentException();
+            }
+
+            incoming = new Log();
+            outgoing = new Log();
+            initMonitor = new Object();
+            benchmarkMonitor = new Object();
+            initExp = new TRef<BenchmarkContract.Exp:Start>(exp);
+        }
+#else
+        internal BenchmarkJournalet(JournalProducer! producer,
+                                    [Claims]ServiceContract.Exp:Start! ep)
+        {
+            base(producer, ep);
+            incoming = new Log();
+            outgoing = new Log();
+            initMonitor = new Object();
+            benchmarkMonitor = new Object();
+        }
+#endif
+
+#if VERSION_2
+        public override void CreateEndpoint(out ServiceContract.Exp! ep)
+#else
+        public override void CreateServerEndpoint(out ServiceContract.Exp:Start! ep)
+#endif
+        {
+            BenchmarkContract.Imp!  imp;
+            BenchmarkContract.Exp!  exp;
+            BenchmarkContract.NewChannel(out imp, out exp);
+
+            //DebugStub.Print("BJ: Enter CreateServerEndpoint\n");
+            try {
+                Monitor.Enter(initMonitor);
+                initImp = new TRef<BenchmarkContract.Imp:Start>(imp);
+                Monitor.Pulse(initMonitor);
+            }
+            finally {
+                Monitor.Exit(initMonitor);
+            }
+            ep = exp;
+            //DebugStub.Print("BJ: Exit CreateServerEndpoint\n");
+        }
+
+#if VERSION_2
+        public override void Flush() {}
+#endif
+
+#if VERSION_2
+        public override void Run()
+#else
+        protected override void ProxyThread()
+#endif
+        {
+            bool    success = false;
+            ulong   time1, time2;
+
+            if (!Initialize()) {
+                goto exit;
+            }
+            for (;;) {
+                if (!HandleMessages()) {
+                    goto exit;
+                }
+
+                time1 = Processor.GetCycleCount();
+                success = Recover();
+                time2 = Processor.GetCycleCount();
+                DebugStub.Print("BJ: ==== Recovery Result ====\n");
+                DebugStub.Print("outgoing incoming start end\n");
+                DebugStub.Print("{0},{1},{2},{3}\n",
+                                __arglist(incoming.Count, outgoing.Count,
+                                          time1, time2));
+                if (!success) {
+                    goto exit;
+                }
+            }
+exit:
+#if !VERSION_2
+            producer.DeregisterJournalet(this);
+#endif
+            return;
+        }
+
+        protected override bool Initialize()
+        {
+            bool success = false;
+            BenchmarkContract.Exp:Start clientEp;
+            BenchmarkContract.Imp:Start serverEp;
+
+#if VERSION_2
+            clientEp = initExp.Acquire();
+#else
+            ServiceContract.Exp:Start!  ep = clientRef.Acquire();
+            clientEp = ep as BenchmarkContract.Exp:Start;
+            if (clientEp == null) {
+                clientRef.Release(ep);
+                return false;
+            }
+#endif
+            assert initImp != null;
+            serverEp = initImp.Acquire();
+            switch receive {
+                case serverEp.Success():
+                    clientEp.SendSuccess();
+                    success = true;
+                    break;
+                case serverEp.ChannelClosed():
+                    success = false;
+                    break;
+                case unsatisfiable:
+                    DebugStub.Break();
+                    break;
+            }
+            initImp = null;
+
+            if (success) {
+                benchmarkExp = new TRef<BenchmarkContract.Exp:Ready>(clientEp);
+                benchmarkImp = new TRef<BenchmarkContract.Imp:Ready>(serverEp);
+                return true;
+            }
+            else {
+                delete clientEp;
+                delete serverEp;
+                return false;
+            }
+        }
+
+        protected override bool HandleMessages()
+        {
+            bool        success = true;
+            ArrayList   al;
+            BenchmarkContract.Exp:Ready! clientEp;
+            BenchmarkContract.Imp:Ready! serverEp;
+
+            assert benchmarkExp != null;
+            assert benchmarkImp != null;
+            clientEp = benchmarkExp.Acquire();
+            serverEp = benchmarkImp.Acquire();
+
+            for (;;) {
+                switch receive {
+                    case clientEp.GetCycleCount():
+                    {
+                        serverEp.SendGetCycleCount();
+                        incoming.Record((uint)MessageType.GetCycleCount, null);
+                        break;
+                    }
+                    case clientEp.Null():
+                    {
+                        serverEp.SendNull();
+                        incoming.Record((uint)MessageType.Null, null);
+                        break;
+                    }
+                    case clientEp.One(arg):
+                    {
+                        serverEp.SendOne(arg);
+                        al = new ArrayList(1);
+                        al.Add(arg);
+                        incoming.Record((uint)MessageType.One, al);
+                        break;
+                    }
+                    case clientEp.Two(arg1, arg2):
+                    {
+                        serverEp.SendTwo(arg1, arg2);
+                        al = new ArrayList(2);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        incoming.Record((uint)MessageType.Two, al);
+                        break;
+                    }
+                    case clientEp.Three(arg1, arg2, arg3):
+                    {
+                        serverEp.SendThree(arg1, arg2, arg3);
+                        al = new ArrayList(3);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        incoming.Record((uint)MessageType.Three, al);
+                        break;
+                    }
+                    case clientEp.Four(arg1, arg2, arg3, arg4):
+                    {
+                        serverEp.SendFour(arg1, arg2, arg3, arg4);
+                        al = new ArrayList(4);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        incoming.Record((uint)MessageType.Four, al);
+                        break;
+                    }
+                    case clientEp.Five(arg1, arg2, arg3, arg4, arg5):
+                    {
+                        serverEp.SendFive(arg1, arg2, arg3, arg4, arg5);
+                        al = new ArrayList(5);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        incoming.Record((uint)MessageType.Five, al);
+                        break;
+                    }
+                    case clientEp.Six(arg1, arg2, arg3, arg4, arg5, arg6):
+                    {
+                        serverEp.SendSix(arg1, arg2, arg3, arg4, arg5, arg6);
+                        al = new ArrayList(6);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        incoming.Record((uint)MessageType.Six, al);
+                        break;
+                    }
+                    case clientEp.Seven(arg1, arg2, arg3, arg4, arg5, arg6,
+                                        arg7):
+                    {
+                        serverEp.SendSeven(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7);
+                        al = new ArrayList(7);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        incoming.Record((uint)MessageType.Seven, al);
+                        break;
+                    }
+                    case clientEp.Eight(arg1, arg2, arg3, arg4, arg5, arg6,
+                                        arg7, arg8):
+                    {
+                        serverEp.SendEight(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7, arg8);
+                        al = new ArrayList(8);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        al.Add(arg8);
+                        incoming.Record((uint)MessageType.Eight, al);
+                        break;
+                    }
+                    case clientEp.Nine(arg1, arg2, arg3, arg4, arg5, arg6,
+                                       arg7, arg8, arg9):
+                    {
+                        serverEp.SendNine(arg1, arg2, arg3, arg4, arg5, arg6,
+                                          arg7, arg8, arg9);
+                        al = new ArrayList(9);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        al.Add(arg8);
+                        al.Add(arg9);
+                        incoming.Record((uint)MessageType.Nine, al);
+                        break;
+                    }
+                    case clientEp.EndOfBenchmark():
+                    {
+                        serverEp.SendEndOfBenchmark();
+                        incoming.Record((uint)MessageType.EndOfBenchmark,
+                                        null);
+                        break;
+                    }
+                    case clientEp.ChannelClosed():
+                    {
+                        success = false;
+                        goto exit;
+                        break;
+                    }
+
+                    case serverEp.CycleCount(cycle):
+                    {
+                        clientEp.SendCycleCount(cycle);
+                        al = new ArrayList(1);
+                        al.Add(cycle);
+                        outgoing.Record((uint)MessageType.CycleCount, al);
+                        break;
+                    }
+                    case serverEp.AckNull():
+                    {
+                        clientEp.SendAckNull();
+                        outgoing.Record((uint)MessageType.AckNull, null);
+                        break;
+                    }
+                    case serverEp.AckOne(arg):
+                    {
+                        clientEp.SendAckOne(arg);
+                        al = new ArrayList(1);
+                        al.Add(arg);
+                        outgoing.Record((uint)MessageType.AckOne, al);
+                        break;
+                    }
+                    case serverEp.AckTwo(arg1, arg2):
+                    {
+                        clientEp.SendAckTwo(arg1, arg2);
+                        al = new ArrayList(2);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        outgoing.Record((uint)MessageType.AckTwo, al);
+                        break;
+                    }
+                    case serverEp.AckThree(arg1, arg2, arg3):
+                    {
+                        clientEp.SendAckThree(arg1, arg2, arg3);
+                        al = new ArrayList(3);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        outgoing.Record((uint)MessageType.AckThree, al);
+                        break;
+                    }
+                    case serverEp.AckFour(arg1, arg2, arg3, arg4):
+                    {
+                        clientEp.SendAckFour(arg1, arg2, arg3, arg4);
+                        al = new ArrayList(4);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        outgoing.Record((uint)MessageType.AckFour, al);
+                        break;
+                    }
+                    case serverEp.AckFive(arg1, arg2, arg3, arg4, arg5):
+                    {
+                        clientEp.SendAckFive(arg1, arg2, arg3, arg4, arg5);
+                        al = new ArrayList(5);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        outgoing.Record((uint)MessageType.AckFive, al);
+                        break;
+                    }
+                    case serverEp.AckSix(arg1, arg2, arg3, arg4, arg5, arg6):
+                    {
+                        clientEp.SendAckSix(arg1, arg2, arg3, arg4, arg5,
+                                            arg6);
+                        al = new ArrayList(6);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        outgoing.Record((uint)MessageType.AckSix, al);
+                        break;
+                    }
+                    case serverEp.AckSeven(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7):
+                    {
+                        clientEp.SendAckSeven(arg1, arg2, arg3, arg4, arg5,
+                                              arg6, arg7);
+                        al = new ArrayList(7);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        outgoing.Record((uint)MessageType.AckSeven, al);
+                        break;
+                    }
+                    case serverEp.AckEight(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7, arg8):
+                    {
+                        clientEp.SendAckEight(arg1, arg2, arg3, arg4, arg5,
+                                              arg6, arg7, arg8);
+                        al = new ArrayList(8);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        al.Add(arg8);
+                        outgoing.Record((uint)MessageType.AckEight, al);
+                        break;
+                    }
+                    case serverEp.AckNine(arg1, arg2, arg3, arg4, arg5, arg6,
+                                          arg7, arg8, arg9):
+                    {
+                        clientEp.SendAckNine(arg1, arg2, arg3, arg4, arg5,
+                                             arg6, arg7, arg8, arg9);
+                        al = new ArrayList(9);
+                        al.Add(arg1);
+                        al.Add(arg2);
+                        al.Add(arg3);
+                        al.Add(arg4);
+                        al.Add(arg5);
+                        al.Add(arg6);
+                        al.Add(arg7);
+                        al.Add(arg8);
+                        al.Add(arg9);
+                        outgoing.Record((uint)MessageType.AckNine, al);
+                        break;
+                    }
+                    case serverEp.AckEnd():
+                    {
+                        clientEp.SendAckEnd();
+                        outgoing.Record((uint)MessageType.AckEnd, null);
+                        break;
+                    }
+                    case serverEp.ChannelClosed():
+                    {
+                        // Recovery
+                        success = true;
+                        goto exit;
+                        break;
+                    }
+                    case unsatisfiable:
+                    {
+                        DebugStub.Break();
+                        break;
+                    }
+                }
+            }
+exit:
+            benchmarkExp.Release(clientEp);
+            if (success) {
+                //2006-9-13 hi:
+                //benchmarkImp.Release(serverEp);
+                //hi: an alternative way to solve 2006-9-13
+                delete serverEp;
+                try {
+                    Monitor.Enter(benchmarkMonitor);
+                    benchmarkImp = null;
+                    Monitor.Pulse(benchmarkMonitor);
+                }
+                finally {
+                    Monitor.Exit(benchmarkMonitor);
+                }
+            }
+            else {
+                delete serverEp;
+                //benchmarkImp = null;
+            }
+            return success;
+        }
+
+        protected override bool Recover()
+        {
+            bool success = false;
+            int[] arg = new int[9];
+            uint msg;
+            MessageType op;
+            IList args;
+            Object tmp;
+            BenchmarkContract.Imp:Start serverEp;
+
+            try {
+                Monitor.Enter(initMonitor);
+                if (initImp == null) {
+                    Monitor.Wait(initMonitor);
+                }
+            }
+            finally {
+                Monitor.Exit(initMonitor);
+            }
+
+            assert initImp != null;
+            serverEp = initImp.Acquire();
+
+            switch receive {
+                case serverEp.Success():
+                    break;
+                case serverEp.ChannelClosed():
+                    delete serverEp;
+                    throw new Exception("Channel was closed" +
+                                        " during recovery.\n");
+                    break;
+                case unsatisfiable:
+                    DebugStub.Break();
+                    break;
+            }
+            initImp = null;
+
+            while (incoming.Playback(out msg, out args)) {
+                op = (MessageType)msg;
+                switch (op) {
+                    case MessageType.GetCycleCount:
+                    {
+                        serverEp.SendGetCycleCount();
+                        break;
+                    }
+                    case MessageType.Null:
+                    {
+                        serverEp.SendNull();
+                        break;
+                    }
+                    case MessageType.One:
+                    {
+                        if (args != null) {
+                            tmp = args[0];
+                            if (tmp != null) {
+                                arg[0] = (int)tmp;
+                            }
+                            serverEp.SendOne(arg[0]);
+                        }
+                        break;
+                    }
+                    case MessageType.Two:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 2; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendTwo(arg[0], arg[1]);
+                        }
+                        break;
+                    }
+                    case MessageType.Three:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 3; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendThree(arg[0], arg[1], arg[2]);
+                        }
+                        break;
+                    }
+                    case MessageType.Four:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 4; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendFour(arg[0], arg[1], arg[2], arg[3]);
+                        }
+                        break;
+                    }
+                    case MessageType.Five:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 5; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendFive(arg[0], arg[1], arg[2], arg[3],
+                                              arg[4]);
+                        }
+                        break;
+                    }
+                    case MessageType.Six:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 6; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendSix(arg[0], arg[1], arg[2], arg[3],
+                                             arg[4], arg[5]);
+                        }
+                        break;
+                    }
+                    case MessageType.Seven:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 7; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendSeven(arg[0], arg[1], arg[2], arg[3],
+                                               arg[4], arg[5], arg[6]);
+                        }
+                        break;
+                    }
+                    case MessageType.Eight:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 8; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendEight(arg[0], arg[1], arg[2], arg[3],
+                                               arg[4], arg[5], arg[6], arg[7]);
+                        }
+                        break;
+                    }
+                    case MessageType.Nine:
+                    {
+                        if (args != null) {
+                            for (int i = 0; i < 9; i++) {
+                                tmp = args[i];
+                                if (tmp != null) {
+                                    arg[i] = (int)tmp;
+                                }
+                            }
+                            serverEp.SendNine(arg[0], arg[1], arg[2], arg[3],
+                                              arg[4], arg[5], arg[6], arg[7],
+                                              arg[8]);
+                        }
+                        break;
+                    }
+                    case MessageType.EndOfBenchmark:
+                    {
+                        serverEp.SendEndOfBenchmark();
+                        break;
+                    }
+                }
+
+                bool result = true;
+                result = outgoing.Playback(out msg, out args);
+                op = (MessageType)msg;
+
+                if (!result) {
+                    /*
+                    DebugStub.Print("Playback: End of log.\n");
+                    DebugStub.Print("Playback: {0} incoming messages\n",
+                                    __arglist(incoming.Count));
+                    DebugStub.Print("Playback: {0} outgoing messages\n",
+                                    __arglist(outgoing.Count));
+                                    */
+                    success = true;
+                    break;
+                }
+
+                switch receive {
+                    case serverEp.CycleCount(cycle):
+                    {
+                        if (op != MessageType.CycleCount) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckNull():
+                    {
+                        if (op != MessageType.Null) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckOne(arg1):
+                    {
+                        if (op != MessageType.AckOne) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckTwo(arg1, arg2):
+                    {
+                        if (op != MessageType.AckTwo) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckThree(arg1, arg2, arg3):
+                    {
+                        if (op != MessageType.AckThree) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckFour(arg1, arg2, arg3, arg4):
+                    {
+                        if (op != MessageType.AckFour) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckFive(arg1, arg2, arg3, arg4, arg5):
+                    {
+                        if (op != MessageType.AckFive) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckSix(arg1, arg2, arg3, arg4, arg5, arg6):
+                    {
+                        if (op != MessageType.AckSix) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckSeven(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7):
+                    {
+                        if (op != MessageType.AckSeven) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckEight(arg1, arg2, arg3, arg4, arg5, arg6,
+                                           arg7, arg8):
+                    {
+                        if (op != MessageType.AckEight) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckNine(arg1, arg2, arg3, arg4, arg5, arg6,
+                                          arg7, arg8, arg9):
+                    {
+                        if (op != MessageType.AckNine) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.AckEnd():
+                    {
+                        if (op != MessageType.AckEnd) {
+                            success = false;
+                        }
+                        else {
+                            success = true;
+                        }
+                        break;
+                    }
+                    case serverEp.ChannelClosed():
+                        throw new Exception("Server-side channel closed" +
+                                            " during recovery\n");
+                        break;
+                    case unsatisfiable:
+                        DebugStub.Break();
+                        break;
+                }
+            } // loop
+
+            //2006-9-13 hi: This may cause an access violation with the
+            //              fully hoisted style server.
+            //delete benchmarkImp.Acquire();
+            //DebugStub.Print("BJ: (2)\n");
+            //benchmarkImp.Release(serverEp);
+
+            //hi: an alternative way to above.
+            try {
+                Monitor.Enter(benchmarkMonitor);
+                if (benchmarkImp != null) {
+                    Monitor.Wait(benchmarkMonitor);
+                }
+                benchmarkImp = new TRef<BenchmarkContract.Imp:Ready>(serverEp);
+            }
+            finally {
+                Monitor.Exit(benchmarkMonitor);
+            }
+
+            return success;
+        }
+    }
+}

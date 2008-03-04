@@ -1,0 +1,50 @@
+﻿<!--
+##############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+#   File:   Interfaces\Collections\Makefile
+#
+#   Note:
+#
+##############################################################################
+-->
+
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\Paths.targets" />
+
+  <PropertyGroup>
+    <AssemblyName>Collections</AssemblyName>
+    <OutputType>Library</OutputType>
+    <NoStdlib>true</NoStdlib>
+    <AssemblyAlias>kernel.exe</AssemblyAlias>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ArrayList.csi" />
+    <Compile Include="BitArray.csi" />
+    <Compile Include="CaseInsensitiveComparer.csi" />
+    <Compile Include="CaseInsensitiveHashCodeProvider.csi" />
+    <Compile Include="Comparer.csi" />
+    <Compile Include="DictionaryEntry.csi" />
+    <Compile Include="Hashtable.csi" />
+    <Compile Include="IDictionary.csi" />
+    <Compile Include="IDictionaryEnumerator.csi" />
+    <Compile Include="IHashCodeProvider.csi" />
+    <Compile Include="Queue.csi" />
+    <Compile Include="SortedList.csi" />
+    <Compile Include="Stack.csi" />
+    <Compile Include="Collections.csi" />
+    <ProjectReference Include="..\Basetypes\Basetypes.csproj">
+      <Alias>kernel.exe</Alias>
+    </ProjectReference>
+    <ProjectReference Include="..\Baseattrs\Baseattrs.csproj">
+      <Alias>kernel.exe</Alias>
+    </ProjectReference>
+  </ItemGroup>
+  
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\InterfaceAssembly.targets" />
+</Project>

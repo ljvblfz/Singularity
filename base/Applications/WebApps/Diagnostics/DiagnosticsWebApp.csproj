@@ -1,0 +1,44 @@
+﻿<!--
+###############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+###############################################################################
+-->
+
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\..\Paths.targets" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>DiagnosticsWebApp</AssemblyName>
+    <AssumeFieldsNonNull>true</AssumeFieldsNonNull>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <Compile Include="Diagnostics.sg" />
+    
+    <BinaryResource Include="diagram.png">
+      <ClassName>DiagnosticImage</ClassName>
+      <Namespace>Microsoft.Singularity.WebApps</Namespace>
+      <FieldName>ImageData</FieldName>
+    </BinaryResource>
+    
+    <BinaryResource Include="MasterPage.htm">
+      <ClassName>MasterPage</ClassName>
+      <Namespace>Microsoft.Singularity.WebApps</Namespace>
+      <FieldName>HTMLData</FieldName>
+    </BinaryResource>
+    
+    <ProjectReference Include="$(SINGULARITY_ROOT)\Contracts\WebApps.Contracts\WebApps.Contracts.csproj" />
+    <ProjectReference Include="..\Driver\WebAppDriver.csproj" />
+    <ProjectReference Include="$(SINGULARITY_ROOT)\Libraries\WebApps\WebAppsLib.csproj" />    
+    <ProjectReference Include="$(SINGULARITY_ROOT)\Contracts\Diagnostics.Contracts\Diagnostics.Contracts.csproj" />
+    <ProjectReference Include="$(SINGULARITY_ROOT)\Contracts\PingPong.Contracts\PingPong.Contracts.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\ConsoleCategory.targets" />
+
+</Project>

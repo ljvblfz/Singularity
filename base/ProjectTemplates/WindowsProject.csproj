@@ -1,0 +1,31 @@
+﻿<!--
+##############################################################################
+
+Microsoft Research Singularity
+
+Copyright (c) Microsoft Corporation.  All rights reserved.
+
+File:   Windows\YourApp\YourApp.csproj
+
+Note:   This is the template for a standard Windows project.  These are projects
+        that are built with the standard CLR "Common Targets", not with
+        SingSharp.targets.
+        
+        Most projects that are created using the Visual Studio project designer
+        can be converted to this template, just by adding the correct <Import>
+        directives at the start and end of the project.
+        
+
+##############################################################################
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\Paths.targets"/>
+
+  <PropertyGroup>
+    <AssemblyName>YourAssemblyNameHere</AssemblyName>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\Windows.targets" />
+
+</Project>

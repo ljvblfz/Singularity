@@ -1,0 +1,24 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   NVidiaDrivers.csi
+//
+//  Note:   Driver interfaces for NVidia drivers.
+//
+
+using System;
+
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyKeyFileAttribute("public.snk")]
+[assembly: System.Reflection.AssemblyDelaySignAttribute(true)]
+
+namespace Microsoft.Singularity.Drivers
+{
+    public class NvPciLpcBridge
+    {
+        public static void Register();
+    }
+}

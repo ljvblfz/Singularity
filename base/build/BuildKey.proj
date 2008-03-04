@@ -1,0 +1,54 @@
+<!--
+##############################################################################
+
+Microsoft Research Singularity
+
+Copyright (c) Microsoft Corporation.  All rights reserved.
+
+File:   Build\BuildKey.proj
+
+Note:   Builds the strong name key for all of the signed Singularity assemblies.
+
+In order for parallel builds to work correctly, no two projects should try to
+write to the same file at the same time.  Previously, strong name key files
+had been emitted by SingSharp.targets, InterfaceAssembly.targets, etc.
+But this breaks parallel builds.  So now all of those projects just build this
+project, which generates the key once, then copies the public.snk file to the
+various places in the output tree where it is needed.  I'm not crazy about this,
+but it solves the problem and should be reliable.
+
+##############################################################################
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <Import Project="..\Paths.targets"/>
+
+  <ItemGroup>
+    <OutputDir Include="$(APPSDIR)"/>
+    <OutputDir Include="$(ILLSDIR)"/>
+    <OutputDir Include="$(KERNEL_IL_DIR)"/>
+    <OutputDir Include="$(APPRUNTIMEDIR)"/>
+    <OutputDir Include="$(LIBSDIR)"/>
+    <OutputDir Include="$(DRIVDIR)"/>
+  </ItemGroup>
+
+  <Target Name="CreateStrongName"
+          Inputs="$(BUILDDIR)\BuildKey.snk"
+          Outputs="$(SINGULARITY_OBJROOT)\public.snk">
+    <MakeDir Directories="$(SINGULARITY_OBJROOT)"/>
+    <Exec Command="$(BUILDDIR)\sn -q -p $(BUILDDIR)\BuildKey.snk $(SINGULARITY_OBJROOT)\public.snk"/>
+  </Target>
+
+  <Target Name="CopyToOutputDirs"
+          Inputs="$(SINGULARITY_OBJROOT)\public.snk"
+          Outputs="@(OutputDir->'%(identity)\public.snk')"
+          DependsOnTargets="CreateStrongName">
+    <MakeDir Directories="@(OutputDir)"/>
+    <Copy SourceFiles="$(SINGULARITY_OBJROOT)\public.snk" DestinationFiles="%(OutputDir.identity)\public.snk" SkipUnchangedFiles="true"/>
+  </Target>
+  
+
+  <Target Name="Build" DependsOnTargets="CreateStrongName;CopyToOutputDirs">
+  </Target>
+
+</Project>

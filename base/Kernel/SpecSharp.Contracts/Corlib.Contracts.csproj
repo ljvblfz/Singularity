@@ -1,0 +1,53 @@
+<!--
+###############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+###############################################################################
+-->
+
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <Import Project="..\..\Paths.targets"/>
+
+  <PropertyGroup>
+    <AssemblyName>Corlib.Contracts</AssemblyName>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>ENDPOINT_STRUCT;SINGULARITY;PTR_SIZE_32;_NEW_CLASSLOADER;NODEFAULTLIB;NOOWNERSHIPCHECK</DefineConstants>
+    <ShadowAssemblyPath>$(APPRUNTIMEDIR)\Corlib.dll</ShadowAssemblyPath>
+    <NoStdLib>false</NoStdLib>
+    <NoStandardLibraries>true</NoStandardLibraries>
+    <OutputPath>$(APPRUNTIMEDIR)</OutputPath>
+    <ExcludeFromNativeReferences>true</ExcludeFromNativeReferences>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <Compile Include="Microsoft.Singularity.Processor.sg"/>
+    <Compile Include="Microsoft.Singularity.Xml.XmlNode.sg"/>
+    <Compile Include="System.Collections.ArrayList.sg"/>
+    <Compile Include="System.Collections.DictionaryEntry.sg"/>
+    <Compile Include="System.Collections.Hashtable.sg"/>
+    <Compile Include="System.Collections.SortedList.sg"/>
+    <Compile Include="System.Boolean.sg"/>
+    <Compile Include="System.Int32.sg"/>
+    <Compile Include="System.Object.sg"/>
+    <Compile Include="System.String.sg"/>
+    <Compile Include="System.Text.Encoding.sg"/>
+    <Compile Include="System.Text.StringBuilder.sg"/>
+    <Compile Include="System.Threading.Thread.sg"/>
+    <Compile Include="System.ValueType.sg"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\App.Corlib.csproj"/>
+    <ProjectReference Include="..\System.Compiler.Runtime\System.Compiler.Runtime.App.csproj"/>
+    <!-- <ProjectReference Include="..\SingSharp.Runtime\Microsoft.SingSharp.Runtime.App.csproj"/> -->
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\AppRuntime.targets"/>
+
+</Project>

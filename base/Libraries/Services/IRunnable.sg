@@ -1,0 +1,21 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\Tests\Calculator\IRunnable.sg
+//
+//  Note:   
+//
+using Microsoft.SingSharp;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Services
+{
+    public interface IRunnable
+    {
+        void Run();
+        void Signal([Claims]ThreadTerminationContract.Exp:Start! ep);
+    }
+}

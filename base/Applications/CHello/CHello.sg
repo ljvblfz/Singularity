@@ -1,0 +1,77 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   CHello.cs
+//
+//  Note:   Simple Singularity test program.
+//
+using System;
+using System.Runtime.CompilerServices;
+using System.Threading;
+
+using Microsoft.Singularity;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.V1.Services;
+using Microsoft.Singularity.Io;
+
+namespace Microsoft.Singularity.Applications
+{
+    public class CHello
+    {
+
+        public static ServiceContract.Imp OpenDevice(String! devname)
+        {
+            ServiceContract.Exp! exp;
+            ServiceContract.Imp! imp;
+            ServiceContract.NewChannel(out imp, out exp);
+
+            // get NS endpoint
+            DirectoryServiceContract.Imp ns = DirectoryService.NewClientEndpoint();
+
+            bool success = false;
+            ns.SendBind(Bitter.FromString2(devname),exp);
+            switch receive
+            {
+                case ns.AckBind():
+                    Console.WriteLine("Received AckBind from namespace.");
+                    success = true;
+                    break;
+                case ns.NakBind(rejected, error):
+                    delete rejected;
+                    Console.WriteLine("Received NakLookup from namespace.");
+                    break;
+                case ns.ChannelClosed():
+                    Console.WriteLine("Channel closed to nameserver.");
+                    break;
+            }
+
+            if (!success)
+            {
+                Console.WriteLine("Bind of {0} failed\n", devname);
+                delete imp;
+                delete ns;
+                return null;
+            }
+
+            delete ns;
+            return imp;
+        }
+
+        public static int Main(String[] args)
+        {
+            Console.WriteLine("Hello World!");
+
+            ServiceContract.Imp device = OpenDevice("/dev/disk0");
+            if (device == null) {
+                Console.WriteLine("Couldn't open disk0");
+                return 1;
+            }
+            delete device;
+            Console.WriteLine("Opened disk0");
+            return 0;
+        }
+    }
+}

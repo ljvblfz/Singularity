@@ -1,0 +1,82 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity - Singularity ABI
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: StackService.csi
+//
+//  Note:
+//
+
+using System.Runtime.CompilerServices;
+
+namespace Microsoft.Singularity.V1.Services
+{
+    public struct StackService
+    {
+        private readonly int id;
+
+        [NoHeapAllocation]
+        public static void GetUnlinkStackRange(out ulong unlinkBegin, out ulong unlinkLimit);
+        [NoHeapAllocation]
+        public static void WalkStack();
+        [NoHeapAllocation]
+        public static void GetUsageStatistics(out ulong gets, out ulong returns);
+
+        [NoHeapAllocation]
+        public static void LinkStack0();
+        [NoHeapAllocation]
+        public static void LinkStack4();
+        [NoHeapAllocation]
+        public static void LinkStack8();
+        [NoHeapAllocation]
+        public static void LinkStack12();
+        [NoHeapAllocation]
+        public static void LinkStack16();
+        [NoHeapAllocation]
+        public static void LinkStack20();
+        [NoHeapAllocation]
+        public static void LinkStack24();
+        [NoHeapAllocation]
+        public static void LinkStack28();
+        [NoHeapAllocation]
+        public static void LinkStack32();
+        [NoHeapAllocation]
+        public static void LinkStack36();
+        [NoHeapAllocation]
+        public static void LinkStack40();
+        [NoHeapAllocation]
+        public static void LinkStack44();
+        [NoHeapAllocation]
+        public static void LinkStack48();
+        [NoHeapAllocation]
+        public static void LinkStack52();
+        [NoHeapAllocation]
+        public static void LinkStack56();
+        [NoHeapAllocation]
+        public static void LinkStack60();
+        [NoHeapAllocation]
+        public static void LinkStack64();
+
+#if PAGING
+        // For use from the ring-3 code in halstack.asm
+        [NoHeapAllocation]
+        public static unsafe UIntPtr GetStackSegmentAndCopy(
+            UIntPtr size,
+            ref ThreadContext context,
+            uint *arg2,
+            uint args,
+            UIntPtr esp,
+            UIntPtr begin,
+            UIntPtr limit);
+
+        // For use from the ring-3 code in halstack.asm
+        [NoHeapAllocation]
+        public static unsafe void ReturnStackSegmentRaw(
+            ref ThreadContext context,
+            UIntPtr begin,
+            UIntPtr limit);
+#endif
+    }
+}

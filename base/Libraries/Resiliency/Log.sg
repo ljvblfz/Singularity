@@ -1,0 +1,97 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Libraries\Resiliency\Log.sg
+//
+//  Note:   
+//
+using System;
+using System.Collections;
+
+namespace Microsoft.Singularity.Resiliency
+{
+    public class Log : IEnumerable
+    {
+        protected IList!        log;
+        protected IEnumerator   enumerator;
+
+        public Log()
+        {
+            log = new ArrayList();
+        }
+
+        public void Record(uint msg, IList args)
+        {
+            if (enumerator != null) {
+                enumerator = null;
+            }
+            log.Add(new LogData(msg, args));
+        }
+
+        public void Record(uint msg)
+        {
+            this.Record(msg, null);
+        }
+
+        public bool Playback(out uint message, out IList args)
+        {
+            LogData data;
+
+            if (enumerator == null) {
+                enumerator = log.GetEnumerator();
+            }
+
+            try {
+                enumerator.MoveNext();
+            }
+            catch (Exception) {
+                enumerator.Reset();
+                enumerator = null;
+                message = 0;
+                args = null;
+                return false;
+            }
+
+            try {
+                data = (LogData)enumerator.Current;
+                if (data == null) {
+                    enumerator = null;
+                    message = 0;
+                    args = null;
+                    return false;
+                }
+                else {
+                    message = data.Message;
+                    args = data.Arguments;
+                    return true;
+                }
+            }
+            catch (Exception) {
+                //DebugStub.Print("Log: {0}\n", __arglist(e.ToString()));
+                message = 0;
+                args = null;
+                return false;
+            }
+        }
+
+        public void Flush()
+        {
+            enumerator = null;
+            log.Clear();
+        }
+
+        public int Count
+        {
+            get { return log.Count; }
+            private set {}
+        }
+
+        public IEnumerator GetEnumerator()
+        {
+            return log.GetEnumerator();
+        }
+    } // class
+}

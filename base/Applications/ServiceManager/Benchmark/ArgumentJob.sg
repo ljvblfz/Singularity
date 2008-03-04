@@ -1,0 +1,113 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Applications\ServiceManager\Benchmark\ArgumentJob.sg
+//
+//  Note:
+//
+using System;
+using System.Threading;
+using System.Text;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Services;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Applications.ServiceManager
+{
+    internal class ArgumentJob : Job
+    {
+        public const int    NPatterns = 10;
+        public const int    NSamples = 100;
+        private ulong[]     xchangeRTT = new ulong[NPatterns];
+
+        internal ArgumentJob(BenchmarkServerInfo! info)
+        {
+            base(info);
+        }
+
+        internal override bool Run()
+        {
+            bool success = false;
+
+            BenchmarkContract.Imp:Ready! ep;
+            if (!Bind(out ep)) {
+                goto exit;
+            }
+
+            Console.WriteLine("ArgumentJob start");
+            DebugStub.WriteLine("-- ArgumentJob start");
+
+            for (int i = 0; i < NPatterns; i++) {
+                success = TestArgumentsHelper(ep, i, out xchangeRTT[i]);
+                if (!success) {
+                    goto exit;
+                }
+            }
+
+            ep.SendEndOfBenchmark();
+            switch receive {
+                case ep.AckEnd():
+                    break;
+                case ep.ChannelClosed():
+                    break;
+            }
+            success = true;
+exit:
+            delete ep;
+            return success;
+        }
+
+        private bool TestArgumentsHelper(BenchmarkContract.Imp:Ready! ep,
+                                         int num, out ulong time)
+        {
+            bool    success = false;
+            ulong[] time1 = new ulong[NSamples];
+            ulong[] time2 = new ulong[NSamples];
+            ulong   time3;
+
+            time = 0;
+            for (int i = 0; i < NSamples; i++) {
+                if (!Message.SendReceive(ep, num, out time1[i],
+                                         out time2[i])) {
+                    success = false;
+                    goto exit;
+                }
+            }
+
+            time3 = time2[0] - time1[0];
+            for (int i = 1; i < NSamples; i++) {
+                time3 = (time2[i] - time1[i] + time3) / 2;
+            }
+            time = time3;
+            success = true;
+exit:
+            return success;
+        }
+
+        public override String! ToString()
+        {
+            StringBuilder builder = new StringBuilder();
+
+            builder.Append("-- Arguments Test Result --\n");
+            builder.Append("Average Roundtrip ");
+            builder.Append("with various number of message arguments (");
+            builder.Append(NSamples);
+            builder.Append(" samples):\n");
+
+            builder.Append("Args   Cycle\n");
+            builder.Append("----  -------\n");
+            for (int i = 0; i < NPatterns; i++) {
+                builder.AppendFormat("{0, -4}  ", i);
+                builder.AppendFormat("{0, 7}\n", xchangeRTT[i]);
+            }
+
+            return builder.ToString();
+        }
+    }
+}

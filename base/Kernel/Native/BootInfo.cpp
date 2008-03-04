@@ -1,0 +1,31 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   BootInfo.cpp
+//
+//  Note:
+//
+
+#include "hal.h"
+
+#if SINGULARITY_KERNEL
+
+//////////////////////////////////////////////////////////////////////////////
+//
+const Struct_Microsoft_Singularity_BootInfo *g_pBootInfo;
+
+//////////////////////////////////////////////////////////////////////////////
+//
+Struct_Microsoft_Singularity_BootInfo *
+Struct_Microsoft_Singularity_BootInfo::g_HalGetBootInfo()
+{
+    return (Struct_Microsoft_Singularity_BootInfo *)g_pBootInfo;
+}
+
+#endif // SINGULARITY_KERNEL
+
+//
+///////////////////////////////////////////////////////////////// End of File.

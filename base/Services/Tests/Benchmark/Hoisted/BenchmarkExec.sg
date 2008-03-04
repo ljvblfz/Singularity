@@ -1,0 +1,231 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Service\Test\Benchmark\Hoisted\BenchmarkExec.sg
+//
+//  Note:
+//
+using System;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+
+namespace Microsoft.Singularity.Services.Benchmark
+{
+    public class BenchmarkExec : IRunnable
+    {
+        private TRef<ThreadTerminationContract.Exp:Start> signalReceiver;
+        private TRef<DirectoryServiceContract.Imp:Ready>! directoryService;
+
+        public BenchmarkExec([Claims]DirectoryServiceContract.Imp:Ready! ds)
+        {
+            directoryService = new TRef<DirectoryServiceContract.Imp:Ready>(ds);
+        }
+
+        public void Signal([Claims]ThreadTerminationContract.Exp:Start! ep)
+        {
+            signalReceiver = new TRef<ThreadTerminationContract.Exp:Start>(ep);
+        }
+
+        public virtual void Run()
+        {
+            ServiceProviderContract.Exp!        provider;
+            ThreadTerminationContract.Exp!      signal;
+            ESet<BenchmarkContract.Exp:Ready>   eset;
+
+            DebugStub.Print("BenchExecHoisted: Service start\n");
+
+            if (!RegisterName(BenchmarkContract.ModuleName, out provider)) {
+                delete provider;
+                return;
+            }
+
+            eset = new ESet<BenchmarkContract.Exp:Ready>();
+            assert signalReceiver != null;
+            signal = signalReceiver.Acquire();
+            for (;;) {
+                switch receive {
+                    case provider.Connect(serviceEp):
+                    {
+                        //DebugStub.Print("BenchExec: Accepting a client" +
+                        //                " connection request ... ");
+                        BenchmarkContract.Exp:Start bench = serviceEp
+                                as BenchmarkContract.Exp:Start;
+                        if (bench != null) {
+                            //DebugStub.Print("accepted.\n");
+                            provider.SendAckConnect();
+                            bench.SendSuccess();
+                            eset.Add(bench);
+                        }
+                        else {
+                            //DebugStub.Print("denied.\n");
+                            provider.SendNackConnect(serviceEp);
+                        }
+                        break;
+                    }
+                    case provider.ChannelClosed():
+                    {
+                        DebugStub.Print("BenchExec: " +
+                                        "ChannelClosed @ provider\n");
+                        goto exit;
+                        break;
+                    }
+                    case signal.Stop():
+                    {
+                        BenchmarkContract.Exp!:Ready tmp;
+                        signal.SendAckStop();
+                        for (int i = 0; i < eset.Count; i++) {
+                            eset.RecvHead(out tmp);
+                            delete tmp;
+                        }
+                        break;
+                    }
+                    case signal.ChannelClosed():
+                    {
+                        DebugStub.Print("BenchExec: ChannelClosed @ signal\n");
+                        goto exit;
+                        break;
+                    }
+                    case ep.GetCycleCount() in eset:
+                    {
+                        ep.SendCycleCount(Processor.GetCycleCount());
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Null() in eset:
+                    {
+                        ep.SendAckNull();
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.One(arg) in eset:
+                    {
+                        ep.SendAckOne(arg);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Two(arg1, arg2) in eset:
+                    {
+                        ep.SendAckTwo(arg1, arg2);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Three(arg1, arg2, arg3) in eset:
+                    {
+                        ep.SendAckThree(arg1, arg2, arg3);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Four(arg1, arg2, arg3, arg4) in eset:
+                    {
+                        ep.SendAckFour(arg1, arg2, arg3, arg4);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Five(arg1, arg2, arg3, arg4, arg5) in eset:
+                    {
+                        ep.SendAckFive(arg1, arg2, arg3, arg4, arg5);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Six(arg1, arg2, arg3, arg4, arg5, arg6) in eset:
+                    {
+                        ep.SendAckSix(arg1, arg2, arg3, arg4, arg5, arg6);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Seven(arg1, arg2, arg3, arg4, arg5, arg6, arg7) in eset:
+                    {
+                        ep.SendAckSeven(arg1, arg2, arg3, arg4, arg5, arg6,
+                                        arg7);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Eight(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) in eset:
+                    {
+                        ep.SendAckEight(arg1, arg2, arg3, arg4, arg5, arg6,
+                                        arg7, arg8);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.Nine(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) in eset:
+                    {
+                        ep.SendAckNine(arg1, arg2, arg3, arg4, arg5, arg6,
+                                       arg7, arg8, arg9);
+                        eset.Add(ep);
+                        break;
+                    }
+                    case ep.EndOfBenchmark() in eset:
+                    {
+                        ep.SendAckEnd();
+                        delete ep;
+                        break;
+                    }
+                    case ep.ChannelClosed() in eset:
+                    {
+                        DebugStub.Print("BenchExec: ChannelClosed @ client\n");
+                        delete ep;
+                        break;
+                    }
+                }
+            }
+exit:
+            eset.Dispose();
+            signalReceiver.Release(signal);
+            DeregisterName(BenchmarkContract.ModuleName, provider);
+            return;
+        }
+
+        internal bool RegisterName(string! name,
+                                   out ServiceProviderContract.Exp! ep)
+        {
+            bool success = false;
+            ServiceProviderContract.Imp!        imp;
+            ServiceProviderContract.Exp!        exp;
+            DirectoryServiceContract.Imp:Ready! ds;
+
+            DebugStub.Print("BenchExec: Register '{0}' ...", __arglist(name));
+            ServiceProviderContract.NewChannel(out imp, out exp);
+            ds = directoryService.Acquire();
+            ds.SendRegister(Bitter.FromString2(name), imp);
+            switch receive {
+                case ds.AckRegister():
+                    success = true;
+                    DebugStub.Print(" done.\n");
+                    break;
+                case ds.NakRegister(rejected, error):
+                    delete rejected;
+                    success = false;
+                    DebugStub.Print(" fail.\n");
+                    break;
+                case ds.ChannelClosed():
+                    DebugStub.Print(" ChannelClosed @ name service\n");
+                    break;
+            }
+            ep = exp;
+            directoryService.Release(ds);
+            return success;
+        }
+
+        internal void DeregisterName(string! name,
+                                     [Claims]ServiceProviderContract.Exp! ep)
+        {
+            DirectoryServiceContract.Imp:Ready! ds;
+            ds = DirectoryService.NewClientEndpoint();
+            ds.SendDeregister(Bitter.FromString2(name));
+            switch receive {
+                case ds.AckDeregister(imp):
+                    delete imp;
+                    delete ep;
+                    break;
+            }
+            delete ds;
+        }
+    }
+}

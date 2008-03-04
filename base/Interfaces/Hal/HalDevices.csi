@@ -1,0 +1,60 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: HalDevices.csi
+//
+//  Note:
+//
+
+using System;
+using System.Collections;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+
+using Microsoft.Singularity;
+
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyKeyFileAttribute("public.snk")]
+[assembly: System.Reflection.AssemblyDelaySignAttribute(true)]
+
+namespace Microsoft.Singularity.Hal
+{
+    public class HalDevices
+    {
+        public static void Initialize(Processor rootProcessor);
+
+        new public static void Finalize();
+
+        [NoHeapAllocation]
+        public static void EnableIoInterrupt(byte irq);
+
+        [NoHeapAllocation]
+        public static void DisableIoInterrupt(byte irq);
+
+        [NoHeapAllocation]
+        public static bool InternalInterrupt(byte interrupt);
+
+        [NoHeapAllocation]
+        public static byte GetMaximumIrq();
+
+        [NoHeapAllocation]
+        public static int GetProcessorCount();
+
+        public static void StartApProcessors();
+
+        [NoHeapAllocation]
+        public static void FreezeProcessors();
+
+        [NoHeapAllocation]
+        public static void SendFixedIPI(byte vector, int from, int to);
+
+        [NoHeapAllocation]
+        public static void BroadcastFixedIPI(byte vector, bool includeSelf);
+
+        [NoHeapAllocation]
+        public static void ClearFixedIPI();
+    }
+}

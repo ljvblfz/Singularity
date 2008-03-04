@@ -1,0 +1,55 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   PathUtils.sg
+//
+//  Note:
+//
+
+using System;
+using System.Threading;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.FileSystem;
+using Microsoft.Singularity.V1.Services;
+
+namespace FileSystem.Utils
+{
+    public class PathUtils
+    {
+        internal static string FileFromPath(string! filePath)
+        {
+            string dirPath, fileName;
+            SplitPath(filePath, out dirPath, out fileName);
+            return fileName;
+        }
+
+        // Splits a file path into its directory and filename
+        // components
+        internal static void SplitPath(string! filePath,
+                                       out string dirPath,
+                                       out string fileName)
+        {
+            dirPath = String.Empty;
+            fileName = String.Empty;
+
+            string[]! parts = filePath.Split('/');
+            if ((parts == null) || (parts.Length <= 1)) {
+                // Not even a leading slash? Bah!
+                return;
+            }
+
+            fileName = (!)parts[parts.Length-1];
+
+            // The directory path is the full path minus
+            // the trailing leaf part
+            // need to special case Directory Service root. Need to return "/" as dirPath
+            int len = (filePath.Length - fileName.Length - 1) > 0? filePath.Length - fileName.Length - 1 : 1; 
+            dirPath = filePath.Substring(0, len);
+        }
+    }
+}

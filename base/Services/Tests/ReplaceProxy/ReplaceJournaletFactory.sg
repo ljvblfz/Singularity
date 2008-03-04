@@ -1,0 +1,103 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\Tests\ReplaceProxy\ReplaceJournaletFactory.sg
+//
+//  Note:
+using System;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Resiliency;
+using Microsoft.Singularity.Security;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+
+[assembly: Transform(typeof(ServiceResourceTransform))]
+[assembly: ApplicationPublisherAttribute("singularity.microsoft.com")]
+[assembly: AssertPrivilegeAttribute("$register-privilege.localhost")]
+
+namespace Microsoft.Singularity.Services.ReplaceProxy
+{
+    [Category("Service")]
+    internal sealed class Parameters
+    {
+        [Endpoint]
+        public readonly TRef<ManagedServiceContract.Exp:Start> serviceRef;
+
+        [Endpoint]
+        public readonly TRef<DirectoryServiceContract.Imp:Ready> directoryRef;
+
+        [Endpoint]
+        public readonly TRef<DirectoryServiceContract.Exp:Start> myDSRef;
+
+        [Endpoint]
+        public readonly TRef<ManagedProxyContract.Imp:Start> recoveryRef;
+
+        [Endpoint]
+        public readonly TRef<ServiceProxyContract.Exp:Start> proxyRef;
+
+        reflective private Parameters();
+    }
+
+    internal class ReplaceJournaletFactory : JournaletFactory
+    {
+        public bool Accept(ServiceContract.Exp:Start! ep)
+        {
+            GamePlayerContract.Exp:Start cep = ep
+                as GamePlayerContract.Exp:Start;
+            return (cep != null);
+        }
+
+        public Journalet2! CreateJournalet([Claims]ServiceContract.Exp:Start! ep,
+                                          out ServiceContract.Exp! newEp)
+        {
+            Journalet2!             journalet;
+            ServiceContract.Exp!    serverEp;
+
+            journalet = new ReplaceJournalet(ep);
+            journalet.CreateEndpoint(out serverEp);
+            newEp = serverEp;
+            return journalet;
+        }
+
+        internal static int AppMain(Parameters! config)
+        {
+            ManagedServiceContract.Exp:Start    ep;
+            ManagedProxyContract.Imp:Start      mep;
+            DirectoryServiceContract.Imp:Ready  dep;
+            DirectoryServiceContract.Exp:Start  fep;
+            ServiceProxyContract.Exp:Start      xep;
+            ServiceProxy                        proxy;
+            Thread                              thread;
+
+            if (config.directoryRef == null ||
+                config.serviceRef == null || 
+                config.myDSRef == null ||
+                config.recoveryRef == null ||
+                config.proxyRef == null) 
+            {
+                return -1;
+            }
+            dep = config.directoryRef.Acquire();
+            ep = config.serviceRef.Acquire();
+            fep = config.myDSRef.Acquire();
+            mep = config.recoveryRef.Acquire();
+            xep = config.proxyRef.Acquire();
+
+            proxy = new ServiceProxy(new ReplaceJournaletFactory(),
+                                     ep, mep, dep, fep, xep);
+            thread = new Thread(new ThreadStart(proxy.Run));
+            thread.Start();
+
+            return 0;
+        }
+    }
+}

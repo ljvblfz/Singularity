@@ -1,0 +1,21 @@
+
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <Import Project="..\Paths.targets"/>
+
+  <PropertyGroup>
+    <DistroName>World</DistroName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Application Include="$(SINGULARITY_ROOT)\Applications\**\*.csproj"
+                 Exclude="$(SINGULARITY_ROOT)\Applications\**\Namespace\AtomicTestDSP\AtomicTestDSP.csproj;$(SINGULARITY_ROOT)\Applications\**\CHello2\CHello2.csproj"/>
+    <Application Include="$(SINGULARITY_ROOT)\Drivers\**\*.csproj"
+                 Exclude="$(SINGULARITY_ROOT)\Drivers\**\Network\nForce4\*.csproj"/>
+    <Application Include="$(SINGULARITY_ROOT)\Libraries\**\*.csproj"/>
+    <Application Include="$(SINGULARITY_ROOT)\Services\Services.proj"/>
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\Distro.targets"/>
+
+</Project>

@@ -1,0 +1,183 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   ProcMemInfoModule.sg
+//
+//
+//  Note:   ProcMemInfo diagnostic module
+//
+
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Diagnostics.Contracts;
+using Microsoft.Singularity.Directory;
+using System;
+
+using Microsoft.Singularity.Hal;
+
+namespace Microsoft.Singularity.Diagnostics
+{
+    public class ProcMemInfoModule
+    {
+        private void Run()
+        {
+            // Here is the channel we use to communicate with
+            // the NameServer
+            ServiceProviderContract.Imp! nsImp;
+            ServiceProviderContract.Exp! nsExp;
+
+            ServiceProviderContract.NewChannel(out nsImp, out nsExp);
+
+            // Here is our NameServer connection over which we
+            // receive new client channels.
+            DirectoryServiceContract.Imp epNS =
+                DirectoryService.NewClientEndpoint();
+
+            try {
+                epNS.SendRegister(Bitter.FromString2
+                                  (ProcMemInfoContract.ModuleName), nsImp);
+
+                switch receive {
+                    case epNS.AckRegister() :
+                        // All is well.
+                        break;
+
+                    case epNS.NakRegister
+                        (ServiceProviderContract.Imp:Start rejectedEP,
+                         ErrorCode error) :
+                        // All is very much not well; abort.
+                        DebugStub.Print
+                        ("Failed register ProcMemInfo Diagnostic module.\n");
+                        if (rejectedEP != null) {
+                            delete rejectedEP;
+                        }
+                        delete nsExp;
+                        return;
+                }
+            }
+            finally {
+                delete epNS;
+            }
+
+            // Here is the set of client channels we service
+            ESet<ProcMemInfoContract.Exp:ReadyState> epSet =
+                new ESet<ProcMemInfoContract.Exp:ReadyState>();
+
+            while(true) {
+
+                switch receive {
+
+                    // ----------------------- Requests for new connections
+                  case nsExp.Connect(ServiceContract.Exp:Start! newEp) :
+
+                    // We expect people to give us
+                    // ProcMemInfoContract.Exp instances
+                    ProcMemInfoContract.Exp newDiagEp =
+                        newEp as ProcMemInfoContract.Exp;
+
+                    if (newDiagEp == null) {
+                        // Invalid contract type. Fail.
+                        nsExp.SendNackConnect(newEp);
+                    }
+                    else {
+                        // Signal ready and start servicing this contract
+                        nsExp.SendAckConnect();
+                        newDiagEp.SendReady();
+                        epSet.Add(newDiagEp);
+                    }
+                    break;
+
+                    // ----------------------- Get Processor Affinity
+                  case ep.GetProcessorAffinity() in epSet:
+
+                    IHalMemory.ProcessorAffinity[] processors =
+                        Processor.GetProcessorAffinity();
+
+                    ProcMemInfoContract.ProcessorAffinity[] in
+                        ExHeap retval;
+
+                    if (processors == null) {
+                        retval = null;
+                    }
+                    else {
+                        retval = new[ExHeap]
+                            ProcMemInfoContract.ProcessorAffinity
+                            [processors.Length];
+
+                        for (int i = 0; i < processors.Length; i++) {
+                            retval[i].domain = processors[i].domain;
+                            retval[i].apicId = processors[i].apicId;
+                            retval[i].flagIgnore =
+                                processors[i].flagIgnore;
+                        }
+                    }
+                    ep.SendResultProcessorAffinity(retval);
+                    epSet.Add(ep);
+                    break;
+
+                    // ----------------------- Get Memory Affinity
+                  case ep.GetMemoryAffinity() in epSet:
+
+                    IHalMemory.MemoryAffinity[] memories =
+                        Processor.GetMemoryAffinity();
+
+                    ProcMemInfoContract.MemoryAffinity[] in
+                        ExHeap retval;
+
+                    if (memories == null) {
+                        retval = null;
+                    }
+                    else {
+                        retval = new[ExHeap]
+                            ProcMemInfoContract.MemoryAffinity
+                            [memories.Length];
+
+                        for (int i = 0; i < memories.Length; i++) {
+                            retval[i].domain = memories[i].domain;
+                            retval[i].baseAddress = memories[i].baseAddress;
+                            retval[i].endAddress = memories[i].endAddress;
+                            retval[i].memorySize = memories[i].memorySize;
+                            retval[i].flagIgnore = memories[i].flagIgnore;
+                            retval[i].flagHotPluggable =
+                                memories[i].flagHotPluggable;
+                            retval[i].flagNonVolatile =
+                                memories[i].flagNonVolatile;
+                        }
+                    }
+                    ep.SendResultMemoryAffinity(retval);
+                    epSet.Add(ep);
+                    break;
+
+
+                  case ep.ChannelClosed() in epSet :
+                    // Just toss the closed channel
+                    delete ep;
+                    break;
+
+                  case epSet.Empty() && nsExp.ChannelClosed():
+                    delete nsExp;
+                    epSet.Dispose();
+                    return;
+                    break;
+                }
+            }
+        }
+
+        internal static void Initialize()
+        {
+            ProcMemInfoModule module = new ProcMemInfoModule();
+
+            Thread thread = Thread.CreateThread(Thread.CurrentProcess,
+                                                new ThreadStart(module.Run));
+
+            if (thread != null) {
+                thread.Start();
+            }
+        }
+    }
+}

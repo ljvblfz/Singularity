@@ -1,0 +1,203 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Contracts\ServiceManager.Contracts\ProxyContract.sg
+//
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+
+namespace Microsoft.Singularity.ServiceManager
+{
+    public rep struct Persistent : ITracked {
+    }
+
+    public contract ServiceProxyContract
+    {
+        out message Success();
+
+        //---------------------------------------------------------------------
+        //      Directory Service Imitation
+        //---------------------------------------------------------------------
+
+        ///
+        /// Registers the path to the root directory service.
+        ///
+        in  message Register(char[]! in ExHeap path,
+                             ServiceProviderContract.Imp:Start! imp);
+        out message AckRegister();
+        out message NakRegister(ServiceProviderContract.Imp:Start imp,
+                                ErrorCode error);
+
+        ///
+        /// De-registers the path from the root directory service.
+        ///
+        in  message Deregister(char[]! in ExHeap path);
+        out message AckDeregister(ServiceProviderContract.Imp:Start! imp);
+        out message NakDeregister(ErrorCode error);
+
+        //---------------------------------------------------------------------
+        //      Persistent Memory
+        //---------------------------------------------------------------------
+
+        in  message Allocate(Persistent in ExHeap obj);
+        out message AckAllocate(ulong objectId);
+        out message NakAllocate(Persistent in ExHeap obj);
+        in  message Deallocate(ulong objectId);
+        out message AckDeallocate();
+        out message NakDeallocate();
+
+        in  message AcquireObject(ulong objectId);
+        out message AckAcquireObject(Persistent in ExHeap obj);
+        out message NakAcquireObject();
+        in  message ReleaseObject(Persistent in ExHeap obj);
+        out message AckReleaseObject();
+        out message NakReleaseObject();
+
+        in  message Upload(byte[]! in ExHeap data);
+        out message AckUpload();
+        in  message Download();
+        out message AckDownload(byte[]! in ExHeap data);
+        out message NakDownload();
+
+        //---------------------------------------------------------------------
+        //      Snapshot facility
+        //---------------------------------------------------------------------
+
+        ///
+        /// Synchronizes journalets to the nearest checkpoints.
+        ///
+        in  message Suspend();
+        //in  message Suspend(char[]! in ExHeap path);
+        out message AckSuspend(int generation);
+
+        ///
+        /// Resumes journalets
+        ///
+        in  message Resume(int generation);
+        //in  message Resume(char[]! in ExHeap path);
+        out message AckResume();
+
+        ///
+        /// Updates the master copy
+        ///
+        in  message Update(int generation);
+        out message AckUpdate();
+
+        state Start : one {
+            Success! -> Ready;
+        }
+
+        state Ready : one {
+            Register? -> (AckRegister! or NakRegister!) -> Ready;
+            Deregister? -> (AckDeregister! or NakDeregister!) -> Ready;
+
+            Allocate? -> (AckAllocate! or NakAllocate!) -> Ready;
+            Deallocate? -> (AckDeallocate! or NakDeallocate!) -> Ready;
+            AcquireObject? -> (AckAcquireObject! or NakAcquireObject!) -> Ready;
+            ReleaseObject? -> (AckReleaseObject! or NakReleaseObject!) -> Ready;
+
+            Upload? -> AckUpload! -> Ready;
+            Download? -> (AckDownload! or NakDownload!) -> Ready;
+
+            Suspend? -> AckSuspend! -> Ready;
+            Resume? -> AckResume! -> Ready;
+            Update? -> AckUpdate! -> Ready;
+        }
+    }
+
+    public contract CPTestContract
+    {
+        out message Success();
+
+        in  message Read1();
+        in  message Read2();
+        in  message Write1(char[] in ExHeap message);
+        in  message Write2(char[] in ExHeap message);
+        in  message Write3(char[] in ExHeap message);
+        in  message Write4(char[] in ExHeap message);
+        out message AckRead1(char[] in ExHeap message);
+        out message AckRead2(char[] in ExHeap message);
+        out message AckWrite1();
+        out message AckWrite2();
+        out message AckWrite3();
+
+        state Start : one {
+            Success! -> CP1;
+        }
+
+        state CP1 : one {
+            Read1? -> AckRead1! -> Write1? -> AckWrite1! -> CP2;
+        }
+
+        state CP2 : one {
+            Write2? -> Write3? -> AckWrite2! -> CP3;
+        }
+
+        state CP3 : one {
+            Read2? -> AckRead2! -> Write4? -> AckWrite3! -> CP1;
+        }
+    }
+
+    /*
+    public sealed class PRef<T> where T : unmanaged struct, ITracked
+    {
+        unsafe T* ExHeap obj;
+        Mutex mutex;
+
+        public PRef([Claims] T* ExHeap! i_obj)
+        {
+            if (i_obj == null) {
+                throw new ArgumentNullException("PRef must be initialized" +
+                                                " with a non-null value!");
+            }
+            ep = master.Acquire();
+            ep.SendAllocate(i_obj);
+            ep.RecvAckAllocate(p_obj);
+            i_obj->Release();
+            obj = i_obj;
+            this.mutex = new Mutex();
+        }
+
+        public T* ExHeap! Acquire()
+        {
+            this.mutex.WaitOne();
+            T* ExHeap elem = this.obj;
+            if (elem == null) {
+                throw new ApplicaionException("thread already holds TRef!");
+            }
+            ep.SendAcquire(this);
+            ep.RecvAckAcquire(elem);
+            this.obj = null;
+            return elem;
+        }
+
+        public void Release([Claims] T* ExHeap! newObj)
+        {
+            if (newObj == null) {
+                throw new ArgumentNullException("TRef must be released" +
+                                                " with a non-null value!");
+            }
+            newObj->Release();
+            obj = newObj;
+            this.mutex.ReleaseMutex();
+        }
+
+        ~PRef()
+        {
+            T* ExHeap toDelete = this.obj;
+            if (toDelete != null) {
+                this.obj = null;
+                unsafe {
+                    toDelete->Dispose();
+                }
+                delete toDelete;
+            }
+        }
+    }
+    */
+}

@@ -1,0 +1,162 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   IdeController.cs
+//
+//  Base Classes and Interfaces for interacting with ATA
+//
+//  References used:
+//  "AT Attachment Interface with Extension (ATA-2)", Revision 4c, DRAFT
+//          09/03/97, ISO Working Group T13, http://www.t13.org/
+//
+//  "AT Attachment 8 - ATA/ATAPI Command Set (ATA8-ACS)", Revision 0, DRAFT
+//          08/17/04, ISO Working Group T13, http://www.t13.org/
+//
+
+using System;
+using System.Collections;
+using System.Text;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Drivers.IDE;
+using Microsoft.Singularity.V1.Services;
+using Microsoft.Singularity.Extending;
+
+using Microsoft.Singularity.Directory;
+
+namespace Microsoft.Singularity.Drivers.IDE
+{
+    // create the resource object for LTR to fill in
+    [DriverCategory]
+    [Signature("/ata/controller")]
+    [EnumeratesDevice("/ata/disk")]
+    [EnumeratesDevice("/ata/atapi/...")]
+    public class DiskResources : DriverCategoryDeclaration
+    {
+        [IoIrqRange(0, Default = 0x0e, Shared = true)]
+        public readonly IoIrqRange irq;
+
+        // [TODO] do all of these need to be shared?
+        [IoPortRange(1, Default = 0x01f0, Length = 0x08, Shared = true)]
+        public readonly IoPortRange command;
+
+        [IoPortRange(2, Default = 0x03f4, Length = 0x04, Shared = true)]
+        public readonly IoPortRange control;
+
+        [IoPortRange(3, Default = 0xffa0, Length = 0x08, Shared = true)]
+        public readonly IoPortRange dma;
+
+        [ExtensionEndpoint]
+        public readonly TRef<ExtensionContract.Exp:Start> extension;
+
+        [ServiceEndpoint(typeof(DiskDeviceContract))]
+        public readonly TRef<ServiceProviderContract.Exp:Start> service;
+
+        [Endpoint]
+        public readonly TRef<VolumeManagerContract.Imp:Start> volman;
+
+        // This should have a custom attribute.
+        public static DiskResources Values;
+
+        // LTR will create the rest of this class:
+
+        // LTR creates a private constructor so that the app writer can't
+        // instantiate objects of this class
+        private DiskResources()
+        {
+            // endpoint initialization
+            extension = new TRef<ExtensionContract.Exp:Start>
+                ((!)(Process.GetStartupEndpoint(0) as ExtensionContract.Exp));
+            service = new TRef<ServiceProviderContract.Exp:Start>
+                ((!)(Process.GetStartupEndpoint(1) as ServiceProviderContract.Exp));
+            volman = new TRef<VolumeManagerContract.Imp:Start>
+                ((!)(Process.GetStartupEndpoint(2) as VolumeManagerContract.Imp));
+
+            // Io Resource initialization
+            IoConfig! config = (!)IoConfig.GetConfig();
+            DebugStub.Print("Disk Config: {0}\n", __arglist(config.ToPrint()));
+
+            // dynamic resources
+            irq = (IoIrqRange)config.DynamicRanges[0];
+            command = (IoPortRange)config.DynamicRanges[1];
+            control = (IoPortRange)config.DynamicRanges[2];
+            dma = (IoPortRange)config.DynamicRanges[3];
+        }
+
+        // LTR creates the static constructor to initialize the singleton.
+        static DiskResources()
+        {
+            Values = new DiskResources();
+        }
+    }
+
+    public class DiskDriverControl
+    {
+        private static IoConfig       config;
+        private static IdeController  controller;
+        private static IdeDisk        disk;
+        private static IdeDiskConfig  diskConfig;
+        private static IdeDiskConfig  slaveDiskConfig;
+
+        public static void SetMasterDiskConfig(IdeDiskConfig config)
+        {
+            diskConfig = config;
+        }
+        public static void SetSlaveDiskConfig(IdeDiskConfig config)
+        {
+            slaveDiskConfig = config;
+        }
+
+        public static int Main(String![]! args)
+        {
+            string! instance = args[2];
+            DebugStub.Print("Disk {0}: Irq={1}\n",
+                            __arglist(
+                                instance,
+                                DiskResources.Values.irq.ToString()));
+
+            // Create the Controller
+            controller = IdeController.Create(DiskResources.Values, args[2]);
+            controller.Initialize();
+
+            ExtensionContract.Exp! extension = DiskResources.Values.extension.Acquire();
+            ServiceProviderContract.Exp! service = DiskResources.Values.service.Acquire();
+            VolumeManagerContract.Imp! volman = DiskResources.Values.volman.Acquire();
+
+            //Create the disk
+            if (diskConfig == null) {
+                if (slaveDiskConfig != null) {
+                    diskConfig = slaveDiskConfig;
+                    Console.WriteLine(" Using slave disk configuration.");
+                    DebugStub.Print("Using slave disk configuration.\n");
+                }
+            }
+            if (diskConfig == null) {
+                Console.WriteLine(" Master disk configuration not found.");
+                DebugStub.Print("Master disk configuration not found.\n");
+                delete service;
+                delete extension;
+                delete volman;
+            }
+            else {
+                disk = new IdeDisk(diskConfig, instance);
+                disk.Run(extension, service, volman);
+            }
+
+            if (disk != null) {
+                disk.Finalize();
+            }
+
+            controller.Finalize();
+            return 0;
+        }
+
+    }
+}

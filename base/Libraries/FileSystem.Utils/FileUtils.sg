@@ -1,0 +1,375 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   FileUtils.sg
+//
+//  Note:
+//
+
+using System;
+using System.Text;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.FileSystem;
+using Microsoft.Singularity.V1.Services;
+
+namespace FileSystem.Utils
+{
+    public class FileUtils
+    {
+        public static object lockTarget     = new object();
+        public static bool recording        = false;
+        public static TimeSpan bindTime     = new TimeSpan(0);
+        public static long bindCount        = 0;
+
+        private static TRef<DirectoryServiceContract.Imp:Ready>! m_epNS = 
+            new TRef<DirectoryServiceContract.Imp:Ready>(DirectoryService.NewClientEndpoint());
+
+        private static DirectoryServiceContract.Imp:Ready! GetDirectoryServiceContract()
+        {
+            return m_epNS.Acquire();
+        }
+
+        private static void ReleaseDirectoryServiceContract([Claims] DirectoryServiceContract.Imp:Ready! imp)
+        {
+            m_epNS.Release(imp);
+        }
+
+
+        public static FileContract.Imp:Ready OpenFile(string! filePath)
+        {
+            DirectoryServiceContract.Imp! rootNS = GetDirectoryServiceContract();
+            try {
+                return OpenFile(filePath, rootNS);
+            }
+            finally {
+                ReleaseDirectoryServiceContract(rootNS);
+            }
+        }
+
+        public static FileContract.Imp:Ready OpenFile(string! filePath, out ErrorCode error)
+        {
+            DirectoryServiceContract.Imp! rootNS = GetDirectoryServiceContract();
+            try {
+                return OpenFile(filePath, rootNS, out error);
+            }
+            finally {
+                ReleaseDirectoryServiceContract(rootNS);
+            }
+        }
+
+        public static FileContract.Imp:Ready OpenFile(string! filePath, DirectoryServiceContract.Imp! rootNS)
+        {
+            ErrorCode error;
+            return OpenFile(filePath, rootNS, out error);
+        }
+
+        public static FileContract.Imp:Ready OpenFile(string! filePath,
+                                                      DirectoryServiceContract.Imp! rootNS,
+                                                      out ErrorCode errorOut)
+        {
+            FileContract.Imp! fileClient;
+            FileContract.Exp! fileServer;
+            FileContract.NewChannel(out fileClient, out fileServer);
+
+            TimeSpan start = ProcessService.GetUpTime();
+            bool ok = SdsUtils.Bind(filePath, rootNS, fileServer, out errorOut);
+            if (recording) {
+                TimeSpan duration = ProcessService.GetUpTime() - start;
+                lock (lockTarget) {
+                    bindTime += duration;
+                    ++bindCount;
+                }
+            }
+            if (!ok) {
+                delete fileClient;
+                return null;
+            }
+            else {
+            }
+            fileClient.RecvSuccess();
+
+            return fileClient;
+        }
+
+        public static bool FileExists(DirectoryServiceContract.Imp:Ready! dsRoot,string! filePath)
+        {
+            ErrorCode error;
+            long size;
+            NodeType nodeType;
+
+            return  GetAttributes(filePath, dsRoot, out size, out nodeType, out  error);
+        }
+
+#if !REMOVE
+        // REMOVE 
+        public static int CreateFile(string! filePath)
+        {
+            DirectoryServiceContract.Imp! rootNS = DirectoryService.NewClientEndpoint();
+
+            try {
+                return CreateFile(filePath, rootNS);
+            }
+            finally {
+                delete rootNS;
+            }
+        }
+#endif
+        public static int CreateFile(string! filePath, DirectoryServiceContract.Imp! ds)
+        {
+            ErrorCode errorCode; 
+            if (!CreateFile(filePath, ds, out errorCode)) {
+                return -1; 
+            }
+            else return 0; 
+        }
+
+        public static bool CreateFile(string! filePath, DirectoryServiceContract.Imp! ds, out ErrorCode errorCode)
+        {
+            errorCode = ErrorCode.Unknown; 
+            
+            string fileName = PathUtils.FileFromPath(filePath);
+
+            if (fileName == null) {
+                // No trailing file part
+                return false;
+            }
+
+            DirectoryServiceContract.Imp dirClient = DirectoryUtils.FindDir(filePath, ds);
+
+            if (dirClient == null)
+            {
+                // Couldn't open enclosing directory
+                return false;
+            }
+
+            dirClient.SendCreateFile(Bitter.FromString2(fileName));
+
+            switch receive {
+                case dirClient.NakCreateFile(error):
+                    // Failure
+                    errorCode = error; 
+                    delete dirClient;
+                    return false;
+
+                case dirClient.AckCreateFile():
+                    // Success
+                    break;
+
+                case dirClient.ChannelClosed():
+                    // Channel closed unexpectedly
+                    errorCode = ErrorCode.ChannelClosed; 
+                    delete dirClient;
+                    return false;
+            }
+
+            delete dirClient;
+            return true;
+        } //createFile
+
+        // 0 is success
+        public static bool GetAttributes(string! filePath,
+                                      DirectoryServiceContract.Imp! ds,
+                                      out long size,
+                                      out NodeType nodeType,
+                                      out ErrorCode errorOut)
+        {
+            bool ok = SdsUtils.GetAttributes(filePath, ds, out size, out nodeType, out errorOut);
+            return ok;
+        }
+
+        // 0 is success
+        public static bool GetAttributes(string! filePath,
+                                         out long size,
+                                         out NodeType nodeType,
+                                         out ErrorCode errorOut)
+        {
+            bool ok = false;
+            nodeType = NodeType.BadNode;
+            errorOut = ErrorCode.Unknown;
+            size = 0;
+            DirectoryServiceContract.Imp! rootNS = GetDirectoryServiceContract();
+            try {
+                ok = GetAttributes(filePath, rootNS, out size, out nodeType, out errorOut);
+            }
+            catch (Exception e) {
+                Console.WriteLine("FileUtils.GetAttributes exception: {0}", e.Message);
+            }
+            finally {
+                ReleaseDirectoryServiceContract(rootNS);
+            }
+            return ok;
+        }
+
+#if !REMOVE
+        // REMOVE version that does not have ep 
+        public static int DeleteFile(string! filePath)
+        {
+            DirectoryServiceContract.Imp! ds = GetDirectoryServiceContract();
+            ErrorCode errorOut = ErrorCode.Unknown;
+            try {
+                DeleteFile(filePath, ds, out errorOut); 
+            }
+            catch (Exception e) {
+                Console.WriteLine("FileUtils.DeleteFile exception: {0}", e.Message);
+            }
+            finally {
+                ReleaseDirectoryServiceContract(ds);
+            }
+            return (int) errorOut;  
+        }
+#endif
+         public static int DeleteFile(string! filePath,  DirectoryServiceContract.Imp! ds, out ErrorCode errorOut )
+        {
+            string fileName = PathUtils.FileFromPath(filePath);
+            errorOut = ErrorCode.Unknown; 
+            
+            if (fileName == null) {
+                // No trailing filename
+                errorOut = ErrorCode.NotFound; 
+                return -1;
+            }
+
+            DirectoryServiceContract.Imp dirClient = DirectoryUtils.FindDir(filePath, ds);
+
+            if (dirClient == null)
+            {
+                // Couldn't open enclosing directory
+                errorOut = ErrorCode.NotFound; 
+                return -1;
+            }
+
+            dirClient.SendDeleteFile(Bitter.FromString2(fileName));
+
+            switch receive {
+                case dirClient.NakDeleteFile(error):
+                    errorOut = error; 
+                    // Failed; no such file?
+                    delete dirClient;
+                    return (int) errorOut; 
+
+                case dirClient.AckDeleteFile():
+                    errorOut = ErrorCode.NoError;
+                    // Success
+                    break;
+
+                case dirClient.ChannelClosed():
+                    // Channel closed unexpectedly
+                    errorOut = ErrorCode.ChannelClosed;
+                    delete dirClient;
+                    return (int) errorOut;
+            }
+
+            delete dirClient;
+            return 0;
+        } //DeleteFile
+
+        public static byte[] ReadEntireFile(
+            string! filePath,
+            DirectoryServiceContract.Imp! ds)
+        {
+            FileContract.Imp:Ready fileEP = OpenFile(filePath, ds);
+
+            if (fileEP == null) {
+                delete fileEP;
+                return null;
+            }
+
+            long size;
+            NodeType ignored;
+            ErrorCode err;
+
+            if (!GetAttributes(filePath, out size, out ignored, out err)) {
+                delete fileEP;
+                return null;
+            }
+
+            byte[] data = new byte[size];
+
+            if (Read(fileEP, 0, (int)size, 0, data) != size) {
+                delete fileEP;
+                return null;
+            }
+
+            delete fileEP;
+            return data;
+        }
+
+        public static long Read(
+            FileContract.Imp:Ready! fileClient,
+            int bufOffset,
+            int readSize,
+            long fileOffset,
+            byte[]! buf)
+        {
+            long readCount = 0;
+            int error;
+            byte[]! in ExHeap readBytes = new[ExHeap] byte[readSize];
+            fileClient.SendRead(readBytes, 0, fileOffset, readBytes.Length);
+            fileClient.RecvAckRead(out readBytes, out readCount, out error);
+
+            if (error == 0) {
+                Bitter.ToByteArray(readBytes, 0, (int)readCount, buf, (int)bufOffset);
+            } else {
+                readCount = 0;
+            }
+
+            delete readBytes;
+            return readCount;
+        }
+
+        public static long Write(
+            FileContract.Imp:Ready! fileClient,
+            int bufOffset,
+            int writeSize,
+            long fileOffset,
+            byte[]! buf)
+        {
+            long writeCount = 0;
+            int error;
+            byte[]! in ExHeap writeBytes = new[ExHeap] byte[writeSize];
+
+            Bitter.FromByteArray(writeBytes, 0, writeSize, buf, bufOffset);
+            fileClient.SendWrite(writeBytes, 0, fileOffset, writeSize);
+            fileClient.RecvAckWrite(out writeBytes, out writeCount, out error);
+
+            if (error != 0) {
+                writeCount = 0;
+            }
+
+            delete writeBytes;
+            return writeCount;
+        }
+
+        public static long Write(
+            FileContract.Imp:Ready! fileClient,
+            long offset,
+            byte[]! data)
+        {
+            return Write(fileClient, 0, data.Length, offset, data);
+        }
+
+        // we'll do something more intelligent than this later
+        public static long Write(
+            FileContract.Imp:Ready! fileClient,
+            long offset,
+            string! line) {
+
+            return Write(fileClient, offset, Encoding.UTF8.GetBytes(line));
+        }
+
+        public static long WriteLine(
+            FileContract.Imp:Ready! fileClient,
+            long offset,
+            string line) {
+
+            return Write(fileClient, offset, line+"\r\n");
+        }
+    }
+}

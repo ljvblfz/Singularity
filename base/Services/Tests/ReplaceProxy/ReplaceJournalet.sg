@@ -1,0 +1,360 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\Tests\ReplaceProxy\ReplaceJournalet.sg
+//
+//  Note:   
+//
+using System;
+using System.Threading;
+using System.Collections;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Resiliency;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Services.ReplaceProxy
+{
+    internal enum MessageType : uint
+    {
+        Unknown,
+        Search,
+        Overwrite,
+        Protect,
+        Score,
+        AckSearch,
+        AckOverwrite,
+        AckProtect,
+        AckScore,
+    }
+
+    internal sealed class ReplaceJournalet : Journalet2
+    {
+        private Log!    incoming;
+        private Log!    outgoing;
+        private TRef<GamePlayerContract.Imp:Start>  initImpRef;
+        private TRef<GamePlayerContract.Exp:Start>! initExpRef;
+        private TRef<GamePlayerContract.Imp:Ready>  gameImpRef;
+        private TRef<GamePlayerContract.Exp:Ready>  gameExpRef;
+
+        internal ReplaceJournalet([Claims]ServiceContract.Exp:Start! ep)
+            : base()    // Initializes the thread to run the journalet
+        {
+            GamePlayerContract.Exp:Start    newEp;
+
+            newEp = ep as GamePlayerContract.Exp:Start;
+            if (newEp == null) {
+                throw new ArgumentException();
+            }
+            this.incoming = new Log();
+            this.outgoing = new Log();
+            this.initExpRef = new TRef<GamePlayerContract.Exp:Start>(newEp);
+        }
+
+        public override void CreateEndpoint(out ServiceContract.Exp! ep)
+        {
+            GamePlayerContract.Imp! imp;
+            GamePlayerContract.Exp! exp;
+
+            GamePlayerContract.NewChannel(out imp, out exp);
+            initImpRef = new TRef<GamePlayerContract.Imp:Start>(imp);
+            ep = exp;
+        }
+
+        public override void Flush()
+        {
+            incoming.Flush();
+            outgoing.Flush();
+        }
+
+        protected override bool Initialize()
+        {
+            bool                            success = false;
+            GamePlayerContract.Imp:Start!   imp;
+            GamePlayerContract.Exp:Start!   exp;
+
+            assert initImpRef != null;
+            imp = initImpRef.Acquire();
+            exp = initExpRef.Acquire();
+
+            switch receive {
+                case imp.Success():
+                    exp.SendSuccess();
+                    success = true;
+                    break;
+                case unsatisfiable:
+                    success = false;
+                    break;
+            }
+
+            if (success) {
+                gameImpRef = new TRef<GamePlayerContract.Imp:Ready>(imp);
+                gameExpRef = new TRef<GamePlayerContract.Exp:Ready>(exp);
+            }
+            else {
+                delete imp;
+                delete exp;
+            }
+            return success;
+        }
+
+        protected override bool HandleMessages()
+        {
+            bool                            recovery = false;
+            GamePlayerContract.Imp:Ready!   imp;
+            GamePlayerContract.Exp:Ready!   exp;
+
+            assert gameImpRef != null;
+            assert gameExpRef != null;
+            imp = gameImpRef.Acquire();
+            exp = gameExpRef.Acquire();
+
+            for (;;) {
+                switch receive {
+                    case exp.Search(array):
+                    {
+                        Sync();
+
+                        String obj = Bitter.ToString2(array);
+                        IList args = new ArrayList(1);
+                        args.Add(obj);
+                        incoming.Record((uint)MessageType.Search, args);
+                        imp.SendSearch(array);
+                        DebugStub.Print("Search {0}\n",
+                                        __arglist(incoming.Count));
+                        break;
+                    }
+                    case exp.Overwrite(array, number):
+                    {
+                        Sync();
+
+                        String obj = Bitter.ToString2(array);
+                        IList args = new ArrayList(2);
+                        args.Add(obj);
+                        args.Add(number);
+                        incoming.Record((uint)MessageType.Overwrite, args);
+                        imp.SendOverwrite(array, number);
+                        DebugStub.Print("Overwrite {0}\n",
+                                        __arglist(incoming.Count));
+                        break;
+                    }
+                    case exp.Protect(number):
+                    {
+                        Sync();
+
+                        IList args = new ArrayList(1);
+                        args.Add(number);
+                        incoming.Record((uint)MessageType.Protect, args);
+                        imp.SendProtect(number);
+                        DebugStub.Print("Protect {0}\n",
+                                        __arglist(incoming.Count));
+                        break;
+                    }
+                    case exp.Score(array):
+                    {
+                        Sync();
+
+                        String obj = Bitter.ToString2(array);
+                        IList args = new ArrayList(1);
+                        args.Add(obj);
+                        incoming.Record((uint)MessageType.Score, args);
+                        imp.SendScore(array);
+                        DebugStub.Print("Score {0}\n",
+                                        __arglist(incoming.Count));
+                        break;
+                    }
+                    case imp.AckSearch(number):
+                        IList args = new ArrayList(1);
+                        args.Add(number);
+                        outgoing.Record((uint)MessageType.AckSearch, args);
+                        exp.SendAckSearch(number);
+                        break;
+                    case imp.AckOverwrite():
+                        exp.SendAckOverwrite();
+                        // snapshot
+                        Checkpoint();
+                        Flush();
+                        break;
+                    case imp.AckProtect():
+                        exp.SendAckProtect();
+                        // truncate
+                        Flush();
+                        break;
+                    case imp.AckScore(number):
+                        exp.SendAckScore(number);
+                        // truncate
+                        Flush();
+                        break;
+                    case exp.ChannelClosed():
+                    {
+                        goto exit;
+                        break;
+                    }
+                    case imp.ChannelClosed():
+                    {
+                        recovery = true;
+                        goto exit;
+                        break;
+                    }
+                }
+            }
+exit:
+            if (recovery) {
+                gameImpRef.Release(imp);
+                gameExpRef.Release(exp);
+            }
+            else {
+                delete imp;
+                delete exp;
+            }
+            return recovery;
+        }
+
+        protected override bool Recover()
+        {
+            GamePlayerContract.Imp!         imp;
+            IEnumerator                     enumerator;
+            uint                            msg;
+            IList                           args;
+
+            DebugStub.Print("ReplaceJ: Enter Recover\n");
+            assert initImpRef != null;
+            imp = initImpRef.Acquire();
+            switch receive {
+                case imp.Success():
+                    break;
+                case imp.ChannelClosed():
+                    throw new ChannelClosedException();
+                    break;
+                case unsatisfiable:
+                    throw new ArgumentException();
+                    break;
+            }
+
+            DebugStub.Print("ReplaceJ: Length: {0}\n",
+                            __arglist(incoming.Count));
+            enumerator = incoming.GetEnumerator();
+            if (!enumerator.MoveNext()) {
+                //delete gameImpRef.Acquire();
+                //gameImpRef.Release(imp);
+                gameImpRef = new TRef<GamePlayerContract.Imp:Ready>(imp);
+                DebugStub.Print("ReplaceJ: log is empty. Return\n");
+                return true;
+            }
+            try {
+                while (incoming.Playback(out msg, out args)) {
+                    DebugStub.Print("ReplaceJ: sending msg: {0}\n",
+                                    __arglist((int)msg));
+                    if (args != null) {
+                        DebugStub.Print("ReplaceJ: num args: {0}\n",
+                                        __arglist(args.Count));
+                    }
+                    switch ((MessageType)msg) {
+                        case MessageType.Search:
+                        {
+                            if (args == null) {
+                                throw new NullReferenceException();
+                            }
+                            Object obj = args[0];
+                            if (obj == null) {
+                                throw new NullReferenceException();
+                            }
+                            String str = obj as String;
+                            if (str == null) {
+                                throw new NullReferenceException();
+                            }
+                            DebugStub.Print("Replay Search '{0}'\n",
+                                            __arglist(str));
+                            imp.SendSearch(Bitter.FromString2(str));
+                            break;
+                        }
+                        case MessageType.Overwrite:
+                        {
+                            if (args == null) {
+                                throw new NullReferenceException();
+                            }
+                            Object obj = args[0];
+                            if (obj == null) {
+                                throw new NullReferenceException();
+                            }
+                            String str = obj as String;
+                            if (str == null) {
+                                throw new NullReferenceException();
+                            }
+                            obj = args[1];
+                            if (obj == null) {
+                                throw new NullReferenceException();
+                            }
+                            DebugStub.Print("Replay Overwrite '{0}' @ {1}\n",
+                                            __arglist(str, (int)obj));
+                            imp.SendOverwrite(Bitter.FromString2(str),
+                                              (int)obj);
+                            break;
+                        }
+                        case MessageType.Protect:
+                        {
+                            if (args == null) {
+                                throw new NullReferenceException();
+                            }
+                            Object obj = args[0];
+                            if (obj == null) {
+                                throw new NullReferenceException();
+                            }
+                            DebugStub.Print("Replay Protect {0}\n",
+                                            __arglist((int)obj));
+                            imp.SendProtect((int)obj);
+                            break;
+                        }
+                        case MessageType.Score:
+                        {
+                            if (args == null) {
+                                throw new NullReferenceException();
+                            }
+                            Object obj = args[0];
+                            if (obj == null) {
+                                throw new NullReferenceException();
+                            }
+                            String str = obj as String;
+                            if (str == null) {
+                                throw new NullReferenceException();
+                            }
+                            imp.SendScore(Bitter.FromString2(str));
+                            break;
+                        }
+                    }
+
+                    if (!outgoing.Playback(out msg, out args)) {
+                        DebugStub.Print("End of log, break\n");
+                        break;
+                    }
+                    switch receive {
+                        case imp.AckSearch(position):
+                            break;
+                        case imp.AckOverwrite():
+                            break;
+                        case imp.AckProtect():
+                            break;
+                        case imp.AckScore(score):
+                            break;
+                        case imp.ChannelClosed():
+                            throw new ChannelClosedException();
+                            break;
+                    }
+                } // End Of Loop
+            }
+            catch (InvalidOperationException) {}
+            finally {
+                //delete gameImpRef.Acquire();
+                //gameImpRef.Release(imp);
+                gameImpRef = new TRef<GamePlayerContract.Imp:Ready>(imp);
+            }
+            DebugStub.Print("ReplaceJ: End of recovery\n");
+            return true;
+        }
+    } // class
+}

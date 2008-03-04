@@ -1,0 +1,20 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\ServiceManager\IServiceProduceable.sg
+//
+//  Note:   
+//
+using System;
+using Microsoft.Singularity;
+
+namespace Microsoft.Singularity.Services.ServiceManager
+{
+    interface IServiceProduceable
+    {
+        Service NewService(string! serviceName, string! binaryName);
+    }
+}

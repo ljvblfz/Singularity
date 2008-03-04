@@ -1,0 +1,38 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   PingPongIntTest.cs
+//
+//  Note:   Simple Singularity test program.
+//
+using System;
+using Microsoft.Singularity.V1.Services;
+using Microsoft.Singularity.Processor;
+
+
+namespace Microsoft.Singularity.Applications
+{
+    public class PingPongIntTest
+    {
+        public static int Main(String[] args)
+        {
+            Console.WriteLine("PingPongIntTest World!");
+
+            //uint a, b, c, d;
+            //Processor.ReadCpuid(0, out a, out b, out c, out d);
+
+            int retval = ProcessService.RunPingPongInt(7);
+            if (retval == 0) {
+                Console.WriteLine("  Retval: {0} -- successful", retval);
+            }
+            else {
+                Console.WriteLine("  Retval: {0} -- fail", retval);
+            }
+
+            return 0;
+        }
+    }
+}

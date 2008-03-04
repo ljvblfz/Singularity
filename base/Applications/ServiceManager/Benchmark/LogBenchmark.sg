@@ -1,0 +1,310 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Applications\ServiceManager\Benchmark\LogBenchmark.sg
+//
+//  Note:
+//
+using System;
+using System.Text;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Diagnostics.Contracts;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+[assembly: Transform(typeof(ApplicationResourceTransform))]
+
+namespace Microsoft.Singularity.Applications.ServiceManager
+{
+    [ConsoleCategory(HelpMessage="Benchmark client", DefaultAction=true)]
+    internal class DefaultConfig
+    {
+        [InputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Exp:READY> Stdin;
+        
+        [OutputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Imp:READY> Stdout;
+
+        [Endpoint]
+        public readonly TRef<ProcessContract.Imp:Start> processRef;
+
+        [Endpoint]
+        public readonly TRef<MemoryContract.Imp:Start> memoryRef;
+
+        [Endpoint]
+        public readonly TRef<ChannelContract.Imp:Start> channelRef;
+
+        reflective internal DefaultConfig();
+
+        internal int AppMain()
+        {
+            return LogBenchmark.DefaultMain(this);
+        }
+    }
+
+    internal sealed class BenchmarkServerInfo
+    {
+        private readonly string!        serviceName;
+        private readonly string!        binaryName;
+        private readonly ServiceType    type;
+
+        internal BenchmarkServerInfo(string! serviceName, string! binaryName,
+                                     ServiceType type)
+        {
+            this.serviceName = serviceName;
+            this.binaryName= binaryName;
+            this.type = type;
+        }
+
+        internal string! ServiceName
+        {
+            get { return serviceName; }
+            private set {}
+        }
+
+        internal string! BinaryName
+        {
+            get { return binaryName; }
+            private set{}
+        }
+
+        internal ServiceType Type
+        {
+            get { return type; }
+            private set{}
+        }
+    }
+
+    internal sealed class LogBenchmark
+    {
+        private BenchmarkServerInfo[] serverList;
+
+        private TRef<ServiceControlContract.Imp:Ready>      serverControlRef;
+        private TRef<ServiceManagementContract.Imp:Ready>   manageRef;
+        private TRef<ProcessContract.Imp:ReadyState>        processRef;
+        private TRef<MemoryContract.Imp:ReadyState>         memoryRef;
+        private TRef<ChannelContract.Imp:ReadyState>        channelRef;
+
+        internal LogBenchmark(BenchmarkServerInfo[] info,
+                              [Claims]ProcessContract.Imp:Start! pep,
+                              [Claims]MemoryContract.Imp:Start! mep,
+                              [Claims]ChannelContract.Imp:Start! cep)
+        {
+            serverList = info;
+            pep.RecvReady();
+            processRef = new TRef<ProcessContract.Imp:ReadyState>(pep);
+            mep.RecvReady();
+            memoryRef = new TRef<MemoryContract.Imp:ReadyState>(mep);
+            cep.RecvReady();
+            channelRef = new TRef<ChannelContract.Imp:ReadyState>(cep);
+        }
+
+        internal void Start()
+        {
+            ServiceControlContract.Imp:Ready! control;
+
+            foreach (BenchmarkServerInfo server in serverList) {
+                if (server == null) {
+                    continue;
+                }
+                
+                // Launch the benchmark server
+                if (!StartService(server)) {
+                    return;
+                }
+
+                // Wait for the server registered.
+                Thread.Sleep(2000);
+
+                // Start the evaluation
+                JobSet.Start(server, serverControlRef);
+
+                // shutdown server
+                if (!StopService()) {
+                    return;
+                }
+                Thread.Sleep(2000);
+            }
+        }
+
+        private bool StartService(BenchmarkServerInfo! info)
+        {
+            bool success = false;
+
+            ServiceInfo* in ExHeap serviceInfo;
+            ServiceManagementContract.Imp!  ep;
+            ServiceControlContract.Imp!     client;
+            ServiceControlContract.Exp!     server;
+
+            Console.Write("Starting service: " + info.ServiceName + " ...");
+            GetEndpoint(out ep);
+            ep.RecvSuccess();
+
+            Console.Write(".");
+            ServiceControlContract.NewChannel(out client, out server);
+            serviceInfo = new [ExHeap] ServiceInfo(0,
+                                                   info.ServiceName,
+                                                   info.BinaryName,
+                                                   info.Type);
+            ep.SendBind(serviceInfo, server);
+            switch receive {
+                case ep.AckBind():
+                {
+                    break;
+                }
+                case ep.NotFound(rejected):
+                {
+                    delete rejected;
+                    Console.WriteLine("Doesn't exist.");
+                    goto exit;
+                    break;
+                }
+                case ep.PermissionDenied(rejected):
+                {
+                    delete rejected;
+                    Console.WriteLine("Permission denied");
+                    goto exit;
+                    break;
+                }
+            }
+
+            client.RecvSuccess();
+            client.SendStartService();
+            switch receive {
+                case client.RecvAckStartService():
+                {
+                    Console.WriteLine(" done.");
+                    success = true;
+                    break;
+                }
+                case client.NakStartService(error):
+                {
+                    Console.WriteLine(" error: " + error);
+                    break;
+                }
+                case client.ChannelClosed():
+                {
+                    Console.WriteLine(" Channel is closed.");
+                    break;
+                }
+            }
+
+exit:
+            if (success) {
+                serverControlRef =
+                    new TRef<ServiceControlContract.Imp:Ready>(client);
+                manageRef =
+                    new TRef<ServiceManagementContract.Imp:Ready>(ep);
+            }
+            else {
+                delete client;
+                delete ep;
+            }
+            return success;
+        }
+
+        private bool StopService()
+        {
+            bool success = false;
+            ServiceControlContract.Imp! client;
+
+            Console.Write("Stopping service ...");
+
+            client = serverControlRef.Acquire();
+            client.SendStopService();
+            switch receive {
+                case client.AckStopService():
+                {
+                    Console.WriteLine(" done.");
+                    success = true;
+                    break;
+                }
+                case client.NakStopService(error):
+                {
+                    Console.WriteLine(" error: " + error);
+                    break;
+                }
+                case unsatisfiable:
+                {
+                    break;
+                }
+            }
+            delete client;
+            delete manageRef.Acquire();
+            return success;
+        }
+
+        private void GetEndpoint(out ServiceManagementContract.Imp! ep)
+        {
+            ErrorCode error;
+            DirectoryServiceContract.Imp ds;
+            ServiceManagementContract.Exp! scServer;
+            ServiceManagementContract.NewChannel(out ep, out scServer);
+
+            ds = DirectoryService.NewClientEndpoint();
+            SdsUtils.Bind(ServiceManagementContract.ModuleName,
+                          ds,
+                          scServer, out error);
+            delete ds;
+        }
+
+        internal static int DefaultMain(DefaultConfig! config)
+        {
+            LogBenchmark bench;
+            BenchmarkServerInfo[] serverInfo = new BenchmarkServerInfo[4] {
+                new BenchmarkServerInfo("RBench", "RBenchWorker",
+                                        ServiceType.Default),
+                new BenchmarkServerInfo("RBench", "RBenchWorker",
+                                        ServiceType.Resilient),
+                new BenchmarkServerInfo("RBench", "RBenchHoisted",
+                                        ServiceType.Default),
+                new BenchmarkServerInfo("RBench", "RBenchHoisted",
+                                        ServiceType.Resilient),
+            };
+
+            StringBuilder   builder = new StringBuilder();
+            ulong[]         time = new ulong[4];
+            Object          obj;
+
+            for (int i = 0; i < 4; i++) {
+                time[i] = 0;
+            }
+            for (int i = 0; i < 100; i++) {
+                time[0] += Processor.GetCycleCount();
+                obj = new Object();
+                time[1] += Processor.GetCycleCount();
+                obj.ToString();
+                time[2] += Processor.GetCycleCount();
+                obj.ToString();
+                time[3] += Processor.GetCycleCount();
+            }
+            for (int i = 0; i < 4; i++) {
+                time[i] /= 100;
+            }
+            builder.AppendFormat("New object: {0}\n", time[1] - time[0]);
+            builder.AppendFormat("ToString1:  {0}\n", time[2] - time[1]);
+            builder.AppendFormat("ToString2:  {0}\n", time[3] - time[2]);
+
+            Console.WriteLine(builder.ToString());
+            DebugStub.WriteLine(builder.ToString());
+
+            bench = new LogBenchmark(serverInfo,
+                                     config.processRef.Acquire(),
+                                     config.memoryRef.Acquire(),
+                                     config.channelRef.Acquire());
+            bench.Start();
+ 
+            return 0;
+        }
+    }
+}

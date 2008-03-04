@@ -1,0 +1,20 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Libraries\Resiliency\ICheckpoint.sg
+//
+//  Note:   
+//
+
+namespace Microsoft.Singularity.Resiliency
+{
+    public interface ICheckpoint
+    {
+        void Suspend();
+        void Flush();
+        void Resume();
+    }
+}

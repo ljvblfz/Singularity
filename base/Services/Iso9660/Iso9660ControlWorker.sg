@@ -1,0 +1,413 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Iso9660ControlWorker.sg
+//
+//  Note:   Handles control messages for Iso9660
+//
+
+using System;
+using System.IO;
+using System.Threading;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Directory;
+
+namespace Microsoft.Singularity.FileSystem {
+
+    public enum Iso9660ControlState {Uninitialized, Initialized, Mounted}
+
+    public class Iso9660ControlWorker {
+        public static bool debug = true;
+        private static bool started = false;
+        private static bool running = true;
+        private static bool success = false;
+        private static bool checkedOut = false;
+        private static Iso9660ControlState controlState =
+            Iso9660ControlState.Uninitialized;
+
+        private static object startToken = new Object();
+        private static object lockToken = new Object();
+        private static string controlPath;
+        private static string mountPath = null;
+
+        // pivot point for the iso9660 control endpoint
+        private static
+            TRef<Iso9660ServiceControlContract.Exp:Ready> controlT;
+
+        public static bool Start(string! controlPath) {
+            Iso9660ControlWorker.controlPath = controlPath;
+            Thread t = new Thread(new ThreadStart(ControlServiceWorker));
+            t.Start();
+            lock (startToken) {
+                while (!started) Monitor.Wait(startToken);
+            }
+
+            return success;
+        }
+
+        // handles namespace connect requests
+        // makes sure only one client ever has access to the
+        // control channel endpoint
+        // client killing the endpoint returns it to this module
+        private static void ControlServiceWorker() {
+            ServiceProviderContract.Imp! providerClient;
+            ServiceProviderContract.Exp! providerServer;
+            ServiceProviderContract.NewChannel(
+                out providerClient, out providerServer);
+
+            // start the thread that actually handles control requests
+            Thread t = new Thread(new ThreadStart(ControlWorker));
+            t.Start();
+
+            // register the control channel
+            DirectoryServiceContract.Imp rootNS = DirectoryService.NewClientEndpoint();
+
+            if (debug) {
+                DebugStub.Print("FS: Sending control register for "+
+                    controlPath+"\r\n");
+            }
+
+            rootNS.SendRegister(Bitter.FromString(controlPath), providerClient);
+
+            switch receive {
+                case rootNS.AckRegister():
+                    if (debug) {
+                        DebugStub.Print("FS: Successfully registered\r\n");
+                    }
+                    success = true;
+                    break;
+                case rootNS.NakRegister(rejected, error):
+                    if (debug) {
+                        DebugStub.Print("FS: Failed register\r\n");
+                    }
+                    delete rejected;
+                    success = false;
+                    break;
+            }
+
+            delete rootNS;
+
+            lock (startToken) {
+                started = true;
+                Monitor.Pulse(startToken);
+            }
+
+            if (!success) {
+                delete providerServer;
+                return;
+            }
+
+            if (debug) {
+                DebugStub.Print("FS: Starting control service "+
+                    "worker loop\r\n");
+            }
+
+            while (running) {
+                ServiceContract.Exp:Start! epServer;
+                Iso9660ServiceControlContract.Exp controlServer;
+
+                // wait for connection message
+                providerServer.RecvConnect(out epServer);
+                controlServer = epServer as Iso9660ServiceControlContract.Exp;
+
+                // hack to get the thing to stop running
+                lock (lockToken) {
+                    if (!running) {
+                        providerServer.SendNackConnect(epServer);
+                        break;
+                    }
+                }
+
+                if (debug) {
+                    DebugStub.Print("FS: received control connect\r\n");
+                }
+
+                if (controlServer == null) {
+                    // Inappropriate channel type
+                    DebugStub.Print("Received improper channel type");
+                    providerServer.SendNackConnect(epServer);
+                }
+                else {
+                    lock (lockToken) {
+                        if (checkedOut) {
+                            if (debug) {
+                                DebugStub.Print("FS: control checked out;"+
+                                                " sending nack...\r\n");
+                            }
+                            providerServer.SendNackConnect(epServer);
+                        } else {
+                            try {
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: processing connect\r\n");
+                                }
+                                checkedOut = true;
+                                controlServer.SendSuccess();
+
+                                // hand the control channel to the worker thread
+                                controlT = new TRef
+                                    <Iso9660ServiceControlContract.Exp:Ready>
+                                    (controlServer);
+                                Monitor.Pulse(lockToken);
+                                providerServer.SendAckConnect();
+                            } catch (Exception e) {
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Caught exception: "+e+"\r\n");
+                                }
+                                throw;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // deregister the control channel
+            rootNS = DirectoryService.NewClientEndpoint();
+
+            if (debug) {
+                DebugStub.Print("FS: Sending control deregister for "+
+                    controlPath+"\r\n");
+            }
+
+            rootNS.SendDeregister(Bitter.FromString(controlPath));
+            switch receive {
+                case rootNS.AckDeregister(providerClient2):
+                    if (debug) {
+                        DebugStub.Print("FS: Successfully deregistered\r\n");
+                    }
+                    success = true;
+                    delete providerClient2;
+                    break;
+                case rootNS.NakDeregister(error):
+                    success = false;
+                    if (debug) {
+                        DebugStub.Print("FS: Failed deregister!!!\r\n");
+                    }
+                    break;
+            }
+            delete rootNS;
+            delete providerServer;
+
+            lock (lockToken) {
+                started = true;
+                Monitor.Pulse(lockToken);
+            }
+        }
+
+        private static void ControlWorker() {
+            Iso9660ServiceControlContract.Exp control = null;
+
+            while (running) {
+                lock (lockToken) {
+                    while(!checkedOut) {Monitor.Wait(lockToken);}
+                }
+                if (debug) {
+                    DebugStub.Print("FS: controlworker triggered\r\n");
+                }
+
+                // grab from the pivot point
+                control = controlT.Acquire();
+                bool inner = true;
+
+                // while the channel is still active, process
+                while (running && inner) {
+                    switch receive {
+                        case control.Initialize(char* opt(ExHeap[]) deviceTemp):
+                            string device = Bitter.ToString(deviceTemp);
+                            delete deviceTemp;
+                            if (debug) {
+                                DebugStub.Print("FS: Got initialize on "+
+                                    device+"\r\n");
+                            }
+                            if (controlState !=
+                                Iso9660ControlState.Uninitialized &&
+                                controlState !=
+                                Iso9660ControlState.Initialized) {
+
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Failed to initialize "+
+                                        device+" (already initialized)\r\n");
+                                }
+                                control.SendNackInitialize();
+                            } else if (controlState == Iso9660ControlState.Initialized) {
+                                control.SendAckInitialize();
+                            } else if (Iso9660Init(device)) {
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Successfully initialized on "+
+                                        device+"\r\n");
+                                }
+                                controlState = Iso9660ControlState.Initialized;
+                                control.SendAckInitialize();
+                            } else {
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Failed to initialize "+
+                                        device+"\r\n");
+                                }
+                                control.SendNackInitialize();
+                            }
+                            break;
+                        case control.Mount(char* opt(ExHeap[]) locationTemp):
+                            string location = Bitter.ToString(locationTemp);
+                            delete locationTemp;
+                            if (debug) {
+                                DebugStub.Print("FS: Got mount to "+
+                                    location+"\r\n");
+                            }
+                            if (controlState !=
+                                Iso9660ControlState.Initialized) {
+
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Failed mount on "+location+
+                                        " (not initialized or "+
+                                        "already mounted)\r\n");
+                                }
+                                control.SendNackMount();
+                            } else if (Mount(location)) {
+
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Successfully mounted "+location+
+                                        "\r\n");
+                                }
+                                controlState = Iso9660ControlState.Mounted;
+                                control.SendAckMount();
+                            } else {
+                                if (debug) {
+                                    DebugStub.Print(
+                                        "FS: Failed mount on "+location+
+                                        "\r\n");
+                                }
+                                control.SendNackMount();
+                            }
+                            break;
+                        case control.Unmount():
+                            if (controlState != Iso9660ControlState.Mounted) {
+                                control.SendNackUnmount();
+                            } else {
+                                Shutdown();
+                                //controlState = Iso9660ControlState.Initialized;
+
+                                lock (lockToken) {
+                                    started = false;
+                                    running = false;
+                                }
+
+                                Iso9660ServiceControlContract.Imp! providerClient;
+                                Iso9660ServiceControlContract.Exp! providerServer;
+                                Iso9660ServiceControlContract.NewChannel(
+                                    out providerClient, out providerServer);
+
+                                DirectoryServiceContract.Imp rootNS = DirectoryService.NewClientEndpoint();
+
+                                if (debug) {
+                                    DebugStub.Print("FS: Triggering control loop to stop\n");
+                                }
+
+                                rootNS.SendBind(Bitter.FromString(controlPath), providerServer);
+                                switch receive {
+                                    case rootNS.NakBind(dummy, code):
+                                        delete dummy;
+                                        break;
+                                }
+
+                                delete providerClient;
+                                delete rootNS;
+                                lock (lockToken) {
+                                    while (!started) {
+                                        Monitor.Wait(lockToken);
+                                    }
+                                }
+                                if (success) {
+                                    control.SendAckUnmount();
+                                } else {
+                                    control.SendNackUnmount();
+                                }
+                                delete control;
+                                return;
+                            }
+                            break;
+                        case control.ChannelClosed():
+                            inner = false;
+                            lock (lockToken) {
+                                checkedOut = false;
+                            }
+                            break;
+                        case unsatisfiable:
+                            // channel killed; fall out
+                            inner = false;
+                            lock (lockToken) {
+                                checkedOut = false;
+                                // XXX
+                                // delete controlT;
+                            }
+                            break;
+                    }
+                }
+
+                controlT.Release(control);
+            }
+        }
+
+        public static bool Iso9660Init(string! device) {
+
+            long unit = Iso9660.Stdio.RawDevice.LoadDisk(device);
+            if (unit < 0) {
+                Console.WriteLine("LoadDisk " + device + " failed with " + unit );
+                return false;
+            }
+            return true;
+        }
+
+        public static bool Mount(string! location) {
+
+                    byte[] superBlock;
+                    superBlock = new byte[2048];
+                    DebugStub.Write("Reading root...");
+                    Iso9660.Stdio.RawDevice.ReadBlock(superBlock,16);
+                    // 0x01 + "CD001"
+                    if (superBlock[0] != (byte)0x01 ||
+                        superBlock[1] != (byte)0x43 ||
+                        superBlock[2] != (byte)0x44 ||
+                        superBlock[3] != (byte)0x30 ||
+                        superBlock[4] != (byte)0x30 ||
+                        superBlock[5] != (byte)0x31) {
+                        return false;
+                    }
+                    if (!Iso9660.SuperBlock.Unmarshall(superBlock))
+                        return false;
+
+                    DebugStub.WriteLine("done.");
+
+                mountPath = location;
+                DebugStub.Write("Starting file instance worker...");
+                FSFileInstanceWorker.Start();
+                DebugStub.WriteLine("done.");
+            
+            DebugStub.Write("Starting directory instance worker...");
+            bool result = FSDirectoryInstanceWorker.Start(location);
+            DebugStub.WriteLine("done.");
+            return result;
+        }
+        
+        public static bool Shutdown() {
+
+                DebugStub.Write("Terminating directory instance worker...");
+                FSDirectoryInstanceWorker.Terminate();
+                DebugStub.WriteLine("done.");
+            
+            DebugStub.Write("Terminating file instance worker...");
+            FSFileInstanceWorker.Terminate();
+            DebugStub.WriteLine("done.");
+            return true;
+        }
+    }
+}

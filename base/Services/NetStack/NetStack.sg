@@ -1,0 +1,155 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   NetStack.sg
+//
+//  Note:
+//
+
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Threading;
+
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Security;
+using Microsoft.Singularity.Io;
+[assembly: ApplicationPublisherAttribute("singularity.microsoft.com")]
+[assembly: AssertPrivilegeAttribute("$register-privilege.localhost")]
+
+namespace NetStack
+{
+    using NetStack.Channels.Private;
+    using NetStack.Channels.Nic;
+
+    /// <summary>
+    /// The NetStack Application class is a single instance service running
+    /// on a host.  When it runs it attempts to register as /dev/netstack;
+    /// success indicates no other instances and it then initializes
+    /// the various NetStack subsystems.
+    /// </summary>
+    class NetStackApplication
+    {
+        private static string nsName = "/dev/netstack";
+
+        private static TRef<ServiceProviderContract.Exp:Start> nsChannel;
+
+        private static void ServiceProviderPump()
+        {
+            ServiceProviderContract.Exp exp = nsChannel.Acquire();
+            try
+            {
+                for (;;)
+                {
+                    switch receive {
+                    case exp.RecvConnect(serviceExp):
+                        exp.SendNackConnect(serviceExp);
+                        break;
+
+                    case exp.ChannelClosed():
+                        goto end;
+                    }
+                }
+                end: ;
+            }
+            finally
+            {
+                delete exp;
+            }
+        }
+
+        private static bool RegisterServiceProvider()
+        {
+            DirectoryServiceContract.Imp ns =
+                DirectoryService.NewClientEndpoint();
+
+            ServiceProviderContract.Imp! imp;
+            ServiceProviderContract.Exp! exp;
+            ServiceProviderContract.NewChannel(out imp, out exp);
+
+            try
+            {
+                ns.SendRegister(Bitter.FromString2(nsName), imp);
+                switch receive
+                {
+                    case ns.AckRegister():
+                        nsChannel =
+                            new TRef<ServiceProviderContract.Exp:Start>(exp);
+                        Thread t =
+                            new Thread(new ThreadStart(ServiceProviderPump));
+                        t.Start();
+                        return true;
+                        break;
+                    case ns.NakRegister(rejected, error):
+                        delete rejected;
+                        delete exp;
+                        break;
+                    case ns.ChannelClosed():
+                        delete exp;
+                        break;
+                    case unsatisfiable:
+                        DebugStub.Break();
+                        delete exp;
+                        break;
+                }
+                return false;
+            }
+            finally
+            {
+                delete ns;
+            }
+        }
+
+        public static void Start()
+        {
+            NetStack.Runtime.StaticConfiguration.Initialize();
+            NetStack.Runtime.StaticConfiguration.Start();
+
+            IPExpManager ipManager = new IPExpManager();
+            ipManager.Start();
+
+            DNSExpManager dnsManager = new DNSExpManager();
+            dnsManager.Start();
+
+            RoutingExpManager routingManager = new RoutingExpManager();
+            routingManager.Start();
+
+            TcpExpManager tcpManager = new TcpExpManager();
+            tcpManager.Start();
+
+            UdpExpManager udpManager = new UdpExpManager();
+            udpManager.Start();
+
+            NicFactory.Probe();
+        }
+
+        public static void Stop()
+        {
+            NetStack.Runtime.StaticConfiguration.Stop();
+        }
+
+        public static int Main(String [] args)
+        {
+            if (RegisterServiceProvider() == false)
+            {
+                Console.WriteLine("Could not start NetStack as it is already registered in namespace.");
+                return -1;
+            }
+
+#if false // Change this to true to enable GC accounting in the network stack.n
+            AppRuntime.EnableGCAccounting = true;
+            DebugStub.WriteLine("NetStack: Enabled GC Accounting");
+#endif
+
+            Start();
+
+            return 0;
+        }
+    }
+}

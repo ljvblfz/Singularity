@@ -1,0 +1,206 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   createfile.sg
+//
+//  Note:
+//
+
+using FileSystem.Utils;
+using System;
+using System.Text;
+using System.Threading;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.FileSystem;
+using Microsoft.Singularity.V1.Services;
+
+using Microsoft.Contracts;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Configuration;
+using FileSystem.Utils;
+
+[assembly: Transform(typeof(ApplicationResourceTransform))]
+
+namespace Microsoft.Singularity.Applications
+{
+    [ConsoleCategory(HelpMessage="create a new file", DefaultAction=true)]
+    internal class Parameters
+    {
+        [InputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Exp:READY> Stdin;
+
+        [OutputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Imp:READY> Stdout;
+
+        [Endpoint]
+        public readonly TRef<DirectoryServiceContract.Imp:Start> nsRef;
+
+        [StringParameter("filename", Mandatory = true, Position = 0, HelpMessage = "Name of file to create")]
+        internal string fileName;
+
+        [StringParameter("c", Default = null, Mandatory = false, HelpMessage = "Initial contents of file as a text string")]
+        internal string contentsString;
+
+        [StringParameter("x", Default = null, Mandatory = false, HelpMessage = "Initial contents of file as a sequence of hexadecimal bytes, such as 000FA8")]
+        internal string contentsHexString;
+
+        [LongParameter("s", Default = 0, Mandatory = false,
+         HelpMessage = "Size of file. Specified contents will be repeated to fill it, or all zero bits will be used if no pattern is specified.")]
+        internal long fileSize;
+
+        reflective internal Parameters();
+
+        internal int AppMain() {
+            return FsCreateFile.AppMain(this);
+        }
+    }
+
+    public class FsCreateFile
+    {
+        internal static bool CreateFile(string! fileName, DirectoryServiceContract.Imp! ds)
+        {
+            ErrorCode error;
+            FileUtils.CreateFile(fileName, ds, out error);
+            bool ok = (error == ErrorCode.NoError);
+            if (!ok) {
+                Console.WriteLine(" File ({0}) create failed. reason:{1}",
+                    fileName, SdsUtils.ErrorCodeToString(error) );
+            }
+            return ok;
+        }
+
+        internal static bool WriteToFile(string! fileName, byte[]! data, long size)
+        {
+            if (size == 0) return true;
+
+            ErrorCode error;
+            FileContract.Imp:Ready fileClient = null;
+            try {
+                fileClient = FileUtils.OpenFile(fileName, out error);
+                if (error != ErrorCode.NoError) {
+                    Console.WriteLine(" File ({0}) open failed. reason:{1}",
+                        fileName, SdsUtils.ErrorCodeToString(error) );
+                    return false;
+                }
+
+                long i;
+                for (i=0; i < size/data.Length; i++) {
+                    FileUtils.Write((!)fileClient, data.Length * i, data);
+                }
+                if ((size % data.Length) > 0) {
+                    FileUtils.Write((!)fileClient, 0, (int)(size % data.Length), data.Length * i, data);
+                }
+
+                return true;
+            }
+            finally {
+                delete fileClient;
+            }
+        }
+
+        private static byte HexUpperCharToByte(char hexChar)
+        {
+            if (Char.IsDigit(hexChar)) {
+                return (byte)(int.Parse(new String(hexChar, 1)));
+            }
+            else {
+                switch(hexChar) {
+                    case 'A': return 10;
+                    case 'B': return 11;
+                    case 'C': return 12;
+                    case 'D': return 13;
+                    case 'E': return 14;
+                    case 'F': return 15;
+                }
+                throw new FormatException(String.Format("Invalid hex character '{0}'", hexChar));
+            }
+        }
+
+        private static byte[]! HexStringToBytes(string! hex)
+        {
+            foreach (char c in " \t\r\n") {
+                hex = hex.Replace(new String(c,1), "");
+            }
+            hex = hex.ToUpper();
+            if (hex.Length == 0) {
+                throw new FormatException("Hex byte string should not be empty.");
+            }
+            if ((hex.Length % 2) != 0) {
+                throw new FormatException("Hex byte string should contain an even number of digits.");
+            }
+
+            byte[]! result = new byte[hex.Length / 2];
+            for(int i=0; i < result.Length; i++) {
+                result[i] = (byte)(HexUpperCharToByte(hex[2*i]) * 16  +
+                                   HexUpperCharToByte(hex[2*i + 1]));
+            }
+            return result;
+        }
+
+        internal static int AppMain(Parameters! config)
+        {
+            if (config.contentsString != null && config.contentsHexString != null) {
+                Console.WriteLine("Can only specify at most one of the options -c or -x.");
+                return -1;
+            }
+
+            DirectoryServiceContract.Imp ds = config.nsRef.Acquire();
+            if (ds == null) {
+                Console.WriteLine("Unable to acquire handle to the Directory Service root");
+                return -1;
+            }
+            ds.RecvSuccess();
+
+            // Check if the file already exists
+            ErrorCode error;
+            long length;
+            NodeType nodeType;
+            SdsUtils.GetAttributes((!)config.fileName, ds, out length, out nodeType, out error);
+            if (error != ErrorCode.NotFound) {
+                Console.WriteLine("Cannot create file. File already exists.");
+                delete ds;
+                return -1;
+            }
+
+            try {
+                byte[]! data = new byte[0];
+                if (config.contentsString != null) {
+                    data = Encoding.UTF8.GetBytes(config.contentsString);
+                }
+                else if (config.contentsHexString != null) {
+                    data = HexStringToBytes(config.contentsHexString);
+                }
+
+                long fileSize = config.fileSize;
+
+                if (fileSize > 0 && data.Length == 0) {
+                    // Fill in with zero bits
+                    data = new byte[1];
+                    data[0] = 0;
+                }
+
+                if (!CreateFile(config.fileName, ds)) {
+                    return -1;
+                }
+                if (!WriteToFile(config.fileName, data, fileSize)) {
+                    return -1;
+                }
+            }
+            catch (FormatException ex) {
+                Console.WriteLine("Invalid parameter format: " + ex.Message + ".");
+                return -1;
+            }
+            finally {
+                delete ds;
+            }
+            return 0;
+        }
+    } // class Test
+}

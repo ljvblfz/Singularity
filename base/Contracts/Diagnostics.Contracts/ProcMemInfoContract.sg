@@ -1,0 +1,61 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   ProcMemInfoContract.sg
+//  Note:   Contract definition for the memory diagnostic module
+//
+
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Channels;
+
+using Microsoft.Singularity.Hal;
+
+namespace Microsoft.Singularity.Diagnostics.Contracts
+{
+    public contract ProcMemInfoContract : ServiceContract
+    {
+        // The name you should use to look up this module using the NameServer.
+        public const string ModuleName = "/procmeminfo-diagnostics";
+
+        public rep struct ProcessorAffinity
+        {
+            public uint domain;
+            public uint apicId;
+            public uint flagIgnore;
+        }
+
+        public rep struct MemoryAffinity
+        {
+            public uint  domain;
+            public ulong baseAddress;
+            public ulong endAddress;
+            public ulong memorySize;
+            public uint  flagIgnore;
+            public uint  flagHotPluggable;
+            public uint  flagNonVolatile;
+        }
+
+        // Signal our identity
+        out message Ready();
+        in  message GetProcessorAffinity();
+        out message ResultProcessorAffinity(ProcessorAffinity[]
+                                                in ExHeap processors);
+        in  message GetMemoryAffinity();
+        out message ResultMemoryAffinity(MemoryAffinity[]
+                                         in ExHeap memories);
+
+        override state Start : one
+        {
+            Ready! -> ReadyState;
+        }
+
+        state ReadyState : one
+        {
+            GetProcessorAffinity? -> ResultProcessorAffinity! -> ReadyState;
+            GetMemoryAffinity? -> ResultMemoryAffinity! -> ReadyState;
+        }
+    }
+}

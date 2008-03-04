@@ -1,0 +1,22 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Libraries\Resiliency\JournaletFactory.sg
+//
+//  Note:   
+//
+using Microsoft.SingSharp;
+using Microsoft.Singularity.Directory;
+
+namespace Microsoft.Singularity.Resiliency
+{
+    public interface JournaletFactory
+    {
+        bool Accept(ServiceContract.Exp:Start! ep);
+        Journalet2! CreateJournalet([Claims]ServiceContract.Exp:Start! ep,
+                                    out ServiceContract.Exp! newEp);
+    }
+}

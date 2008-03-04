@@ -1,0 +1,399 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Applications\ServiceManager\Replace\ReplaceGame.sg
+//
+//  Note:
+//
+using System;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+[assembly: Transform(typeof(ApplicationResourceTransform))]
+
+namespace Microsoft.Singularity.Applications
+{
+    [ConsoleCategory(HelpMessage="Replace Game Client", DefaultAction=true)]
+    internal class DefaultConfig
+    {
+        [InputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Exp:READY> Stdin;
+        
+        [OutputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Imp:READY> Stdout;
+
+        [LongParameter("interval", Default=500)]
+        internal long interval;
+
+        [BoolParameter("test", Default=true)]
+        internal bool test;
+
+        reflective internal DefaultConfig();
+
+        internal int AppMain()
+        {
+            return ReplaceGame.DefaultMain(this);
+        }
+    }
+
+    internal sealed class ReplaceGame
+    {
+        private const int   DefaultCount = 50;
+        private int         count;
+        private String![]!  names;
+        private int         self;
+        private Random!     random;
+
+        private const int   NumberOfActions = 4;
+        private enum        Action : int { Overwrite, Protect, Score, Pose };
+
+        private static TRef<ServiceControlContract.Imp:Ready>!       controlRef;
+        private static TRef<ServiceManagementContract.Imp:Ready>!    manageRef;
+
+        internal ReplaceGame(String![]! competitors, int self)
+        {
+            this.count = DefaultCount;
+            this.names = competitors;
+            this.self = self;
+            Thread.Sleep(1);    // To get a different seed
+            this.random = new Random();
+        }
+
+        internal void Run()
+        {
+            int                     action;
+            GamePlayerContract.Imp! ep;
+
+            if (!Connect(out ep)) {
+                goto exit;
+            }
+
+            switch receive {
+                case ep.Success():
+                    break;
+                case unsatisfiable:
+                    goto exit;
+                    break;
+            }
+
+            Score(ep);
+            Console.WriteLine(names[self] + " start!!");
+            try {
+                while (count-- > 0) {
+                    action = random.Next(NumberOfActions);
+                    switch ((Action)action) {
+                        case Action.Overwrite:
+                            Console.WriteLine(names[self] + " overwrite");
+                            Overwrite(ep);
+                            break;
+                        case Action.Protect:
+                            Console.WriteLine(names[self] + " protect");
+                            Protect(ep);
+                            break;
+                        case Action.Score:
+                            Console.WriteLine(names[self] + " score");
+                            Score(ep);
+                            break;
+                        case Action.Pose:
+                            Pose();
+                            break;
+                    }
+                }
+                Console.WriteLine(names[self] + " end!!");
+                Score(ep);
+            }
+            catch (Exception e) {
+                DebugStub.Print(e.ToString());
+            }
+exit:
+            delete ep;
+        }
+
+        private void Overwrite(GamePlayerContract.Imp:Ready! ep)
+        {
+            int pos = -1;
+            DebugStub.Print("Enter overwrite\n");
+
+            ep.SendSearch(Bitter.FromString2(GetSomeone()));
+            switch receive {
+                case ep.AckSearch(position):
+                    pos = position;
+                    break;
+                case ep.ChannelClosed():
+                    //throw new ChannelClosedException();
+                    break;
+            }
+
+            if (pos >= 0) {
+                ep.SendOverwrite(Bitter.FromString2(names[self]), pos);
+                switch receive {
+                    case ep.AckOverwrite():
+                        break;
+                    case ep.ChannelClosed():
+                        //throw new ChannelClosedException();
+                        break;
+                }
+            }
+            DebugStub.Print("Exit overwrite\n");
+        }
+
+        private void Protect(GamePlayerContract.Imp:Ready! ep)
+        {
+            int pos = -1;
+            ep.SendSearch(Bitter.FromString2(names[self]));
+            switch receive {
+                case ep.AckSearch(position):
+                    pos = position;
+                    break;
+                case ep.ChannelClosed():
+                    //throw new ChannelClosedException();
+                    break;
+            }
+            if (pos >= 0) {
+                ep.SendProtect(pos);
+                switch receive {
+                    case ep.AckProtect():
+                        break;
+                    case ep.ChannelClosed():
+                        //throw new ChannelClosedException();
+                        break;
+                }
+            }
+        }
+
+        private void Score(GamePlayerContract.Imp:Ready! ep)
+        {
+            ep.SendScore(Bitter.FromString2(names[self]));
+            switch receive {
+                case ep.AckScore(score):
+                    Console.Write("{0, -10} : {1}\n", names[self], score);
+                    break;
+                case ep.ChannelClosed():
+                    //throw new ChannelClosedException();
+                    break;
+            }
+        }
+
+        private void Pose()
+        {
+            Thread.Sleep(100);
+        }
+
+        private String! GetSomeone()
+        {
+            int index;
+            do {
+                index = random.Next(names.Length);
+            } while (index == self);
+            return names[index];
+        }
+ 
+        internal bool Connect(out GamePlayerContract.Imp! ep)
+        {
+            DirectoryServiceContract.Imp!   ds;
+            GamePlayerContract.Imp!         imp;
+            GamePlayerContract.Exp!         exp;
+            ErrorCode                       error;
+ 
+            ds = DirectoryService.NewClientEndpoint();
+            GamePlayerContract.NewChannel(out imp, out exp);
+            SdsUtils.Bind(GamePlayerContract.ModuleName, ds, exp, out error);
+            ep = imp;
+            delete ds;
+            return (error == ErrorCode.NoError);
+        }
+
+        //--------------------------------------------------------------------
+        //  Test Code
+        //--------------------------------------------------------------------
+
+        private static bool StartService()
+        {
+            bool success = false;
+
+            ServiceInfo* in ExHeap          serviceInfo;
+            ServiceManagementContract.Imp!  ep;
+            ServiceControlContract.Imp!     imp;
+            ServiceControlContract.Exp!     exp;
+
+            Console.Write("Starting service: " +
+                          GamePlayerContract.ModuleName + " ...");
+            GetEndpoint(out ep);
+            ep.RecvSuccess();
+
+            ServiceControlContract.NewChannel(out imp, out exp);
+            serviceInfo = new [ExHeap] ServiceInfo(0,
+                                                   GamePlayerContract.ModuleName,
+                                                   GamePlayerContract.ModuleName,
+                                                   ServiceType.Resilient);
+            ep.SendBind(serviceInfo, exp);
+            switch receive {
+                case ep.AckBind():
+                {
+                    break;
+                }
+                case ep.NotFound(rejected):
+                {
+                    delete rejected;
+                    Console.WriteLine("Doesn't exist.");
+                    goto exit;
+                    break;
+                }
+                case ep.PermissionDenied(rejected):
+                {
+                    delete rejected;
+                    Console.WriteLine("Permission denied");
+                    goto exit;
+                    break;
+                }
+            }
+
+            imp.RecvSuccess();
+            imp.SendStartService();
+            switch receive {
+                case imp.RecvAckStartService():
+                {
+                    Console.WriteLine(" done.");
+                    success = true;
+                    break;
+                }
+                case imp.NakStartService(error):
+                {
+                    Console.WriteLine(" error: " + error);
+                    break;
+                }
+                case imp.ChannelClosed():
+                {
+                    Console.WriteLine(" Channel is closed.");
+                    break;
+                }
+            }
+
+exit:
+            if (success) {
+                controlRef =
+                    new TRef<ServiceControlContract.Imp:Ready>(imp);
+                manageRef =
+                    new TRef<ServiceManagementContract.Imp:Ready>(ep);
+            }
+            else {
+                delete imp;
+                delete ep;
+            }
+            return success;
+        }
+
+        private static bool RestartService()
+        {
+            bool success = false;
+            ServiceControlContract.Imp:Ready! ep;
+
+            ep = controlRef.Acquire();
+            ep.SendRestartService();
+            switch receive {
+                case ep.AckRestartService():
+                {
+                    success = true;
+                    break;
+                }
+                case ep.ChannelClosed():
+                {
+                    success = false;
+                    break;
+                }
+            }
+            controlRef.Release(ep);
+            return success;
+        }
+
+        private static bool StopService()
+        {
+            bool success = false;
+            ServiceControlContract.Imp:Ready!   ep;
+
+            Console.Write("Stopping service ...");
+
+            ep = controlRef.Acquire();
+            ep.SendStopService();
+            switch receive {
+                case ep.AckStopService():
+                {
+                    Console.WriteLine(" done.");
+                    success = true;
+                    break;
+                }
+                case ep.NakStopService(error):
+                {
+                    Console.WriteLine(" error: " + error);
+                    break;
+                }
+            }
+            delete ep;
+            delete manageRef.Acquire();
+            return success;
+        }
+
+        private static void GetEndpoint(out ServiceManagementContract.Imp! ep)
+        {
+            ErrorCode error;
+            DirectoryServiceContract.Imp ds;
+            ServiceManagementContract.Exp! scServer;
+            ServiceManagementContract.NewChannel(out ep, out scServer);
+
+            DebugStub.Print("GetEndpoint\n");
+            ds = DirectoryService.NewClientEndpoint();
+            SdsUtils.Bind(ServiceManagementContract.ModuleName, ds, scServer,
+                          out error);
+            DebugStub.Print("GetEndpoint: {0}\n", __arglist((int)error));
+            delete ds;
+        }
+
+
+        internal static int DefaultMain(DefaultConfig! config)
+        {
+            // bang! bang! bang!
+            String![]!      names = new String![4] {"Microsoft", "Google", "Yahoo", "Apple"};
+            ReplaceGame![]! game = new ReplaceGame![4];
+            Thread![]!      players = new Thread![4];
+
+            if (config.test) {
+                StartService();
+                Thread.Sleep(2000);
+            }
+
+            for (int i = 0; i < 4; i++) {
+                game[i] = new ReplaceGame(names, i);
+                players[i] = new Thread(new ThreadStart(game[i].Run));
+            }
+            foreach (Thread! player in players) {
+                player.Start();
+            }
+
+            if (config.test) {
+                Thread.Sleep(8000);
+                RestartService();
+            }
+
+            foreach (Thread! player in players) {
+                player.Join();
+            }
+
+            if (config.test) {
+                StopService();
+            }
+
+            return 0;
+        }
+    }
+}

@@ -1,0 +1,223 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   KPTest.sg
+//
+//  Note:   Tests the kernel-process boundary.
+//
+//  Feel free to add more commands to this file.
+
+using System;
+using System.Collections;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Memory;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.V1.Services;
+using Microsoft.Singularity.Stress.Contracts;
+
+using Microsoft.Singularity.Channels;
+using Microsoft.Contracts;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Configuration;
+[assembly: Transform(typeof(ApplicationResourceTransform))]
+
+namespace Microsoft.Singularity.Applications {
+    [ConsoleCategory(DefaultAction=true)]
+    internal class Parameters {
+        [InputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Exp:READY> Stdin;
+
+        [OutputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Imp:READY> Stdout;
+
+        [BoolParameter( "help", Default=false, HelpMessage="Display Extended help message.")]
+        internal bool doHelp;
+
+        [StringArrayParameter( "args", HelpMessage="arg bucket")]
+        internal string[] args;
+        
+        reflective internal Parameters();
+
+        internal int AppMain() {
+            return KPTest.AppMain(this);
+        }
+    }
+    
+    public class KPTest : Microsoft.Singularity.Stress.KPTestBase
+    {
+        static Hashtable! processes = new Hashtable(); // maps strings to Processes
+
+        internal static int AppMain(Parameters! config)
+        {
+            assume config.args != null;
+            string[] args; 
+            if(config.doHelp) {
+                Console.WriteLine("usage:");
+                Console.WriteLine("  kptest command1 ... commandn");
+                Console.WriteLine("where each command is one of:");
+                Console.WriteLine("  print s         {print s; ...remaining commands...;}");
+                Console.WriteLine("  print- s        {...remaining commands...; print s}");
+                Console.WriteLine("  print^ s        {print s; ...remaining commands...; print s}");
+                Console.WriteLine("  catch s         {try {...remaining commands...} catch(Exception) {print s}}");
+                Console.WriteLine("  finally s       {try {...remaining commands...} finally {print s}}");
+                Console.WriteLine("  break           {break; ...remaining commands...; break}");
+                Console.WriteLine("  kernel          {enter kernel; ...remaining commands...; leave kernel");
+                Console.WriteLine("  frames n        {make n stack frames; ...remaining commands...; free frames}");
+                Console.WriteLine("  throw           {throw ArgumentException}");
+                Console.WriteLine("  throwstop       {throw ProcessStopException} (kernel only)");
+                Console.WriteLine("  delay n         {for i=1 to n {compute} ...remaining commands...}");
+                Console.WriteLine("  sleep n         {sleep n milliseconds ...remaining commands...}");
+                Console.WriteLine("  yield           {yield; ...remaining commands...}");
+                Console.WriteLine("  wall            {block forever}");
+                Console.WriteLine("  (* n ... )      {repeat n {...}; ...remaining commands...}}");
+                Console.WriteLine("  (| ... )        {new thread(...); ...remaining commands...}} (process only)");
+                Console.WriteLine("  (& s ... )      {new proc s(...); ...remaining commands...}} (process only)");
+                Console.WriteLine("  suspend s       {suspend proc s; ...remaining commands...} (process only)");
+                Console.WriteLine("  resume s        {resume proc s; ...remaining commands...} (process only)");
+                Console.WriteLine("  stop s          {stop proc s; ...remaining commands...} (process only)");
+                Console.WriteLine("where s is any string and n is any nonnegative integer");
+                Console.WriteLine("example: kptest print hello catch foo frames 1000 kernel finally bar throw");
+                Console.WriteLine("example: kptest print 1 (& p print hi delay 100 print bye ) delay 50 stop p");
+                Console.WriteLine("example: kptest 'print 1 (& p print hi delay 100 print bye ) delay 50 stop p'");
+                return 0;
+            }
+            else if (config.args.Length == 1) {
+                // Turn a single quoted string into a list of arguments.
+                // Beware: this doesn't handle multiple spaces between commands.
+                string foo = config.args[0] ;
+                assert foo != null; 
+                args = foo.Split(new char[] {' '});
+            }
+            else args = config.args; 
+            
+            Console.WriteLine("return value: {0:x}", new KPTest().Go(args, 0));
+            return 0;
+        }
+
+        public KPTest()
+        {
+        }
+
+        private string[] args;
+
+        private KPTest(String[]! args)
+        {
+            this.args = args;
+        }
+        
+        private void Run()
+            requires this.args != null;
+        {
+            Console.WriteLine("new thread running");
+            Console.WriteLine("thread return value: {0:x}", Go(args, 0));
+        }
+
+        public override uint Go(string[]! args, int i)
+        {
+            if (i >= args.Length) return 0x12345678;
+            string arg = args[i];
+            if (arg == "kernel" || arg == "_kernel")
+            {
+                ArgList* in ExHeap exArgs = null;
+                for(int j = args.Length - 1; j >= 0; j--)
+                {
+                    exArgs = new[ExHeap] ArgList(Bitter.FromString(args[j]), exArgs);
+                }
+
+                if (arg == "kernel")
+                {
+                    Console.WriteLine("calling kernel");
+                }
+                unsafe
+                {
+                    uint r = Microsoft.Singularity.V1.Stress.StressDirect.KPTest((SharedHeapService.Allocation*) exArgs, i + 1);
+                    if (arg == "kernel")
+                    {
+                        Console.WriteLine("returned from kernel");
+                    }
+                    return r;
+                }
+            }
+            else if (arg == "(|")
+            {
+                int rParen = FindClosingRParen((!) args, i + 1);
+                string[] before = new string[rParen - (i + 1)];
+                Array.Copy(args, i + 1, before, 0, before.Length);
+                string[] after = new string[args.Length - (rParen + 1)];
+                Array.Copy(args, rParen + 1, after, 0, after.Length);
+                new Thread(new ThreadStart(new KPTest(before).Run)).Start();
+                return Go(after, 0);
+            }
+            else if (arg == "(&")
+            {
+                string! name = (!)args[i + 1];
+                int rParen = FindClosingRParen((!) args, i + 2);
+                string[] before = new string[rParen - (i + 2) + 1];
+                before[0] = "kptest";
+                Array.Copy(args, i + 2, before, 1, before.Length - 1);
+                string[] after = new string[args.Length - (rParen + 1)];
+                Array.Copy(args, rParen + 1, after, 0, after.Length);
+                Process p = new Process(before);
+                processes[name] = p;
+                p.Start();
+                return Go(after, 0);
+            }
+            else if (arg == "suspend" || arg == "_suspend")
+            {
+                string! name = (!)args[i + 1];
+                Process! p = (!)(processes[name] as Process);
+                if (arg == "suspend")
+                {
+                    Console.WriteLine("suspending " + name);
+                }
+                p.Suspend(false);
+                if (arg == "suspend")
+                {
+                    Console.WriteLine("suspended " + name);
+                }
+                return Go(args, i + 2);
+            }
+            else if (arg == "resume" || arg == "_resume")
+            {
+                string! name = (!)args[i + 1];
+                Process! p = (!)(processes[name] as Process);
+                if (arg == "resume")
+                {
+                    Console.WriteLine("resuming " + name);
+                }
+                p.Resume(false);
+                if (arg == "resume")
+                {
+                    Console.WriteLine("resumed " + name);
+                }
+                return Go(args, i + 2);
+            }
+            else if (arg == "stop" || arg == "_stop")
+            {
+                string! name = (!)args[i + 1];
+                Process! p = (!)(processes[name] as Process);
+                if (arg == "stop")
+                {
+                    Console.WriteLine("stopping " + name);
+                }
+                p.Stop();
+                if (arg == "stop")
+                {
+                    Console.WriteLine("stopped " + name);
+                }
+                return Go(args, i + 2);
+            }
+            else
+            {
+                return base.Go(args, i);
+            }
+        }
+    }
+}

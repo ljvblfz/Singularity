@@ -1,0 +1,238 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\ServiceManager\Acceptor.sg
+//
+//  Note:   Service Manager Front-End
+//
+using System;
+using System.Collections;
+using System.Collections.Specialized;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Services.ServiceManager
+{
+    /// <summary>
+    /// Acceptor is a Service Manager front end.  It receives a client's
+    /// connection request, accepts and then binds it to a worker thread
+    /// called ServiceController.
+    /// </summary>
+    internal class Acceptor
+    {
+        private Thread  serviceThread;
+        private string  servicePath;
+        private IList   controllers;
+        private Object  controllersLock;
+
+        private TRef<ThreadTerminationContract.Imp:Start>   leaderTRef;
+        private TRef<ThreadTerminationContract.Exp:Start>   terminalTRef;
+        private TRef<ServiceProviderContract.Exp:Start>     providerTRef;
+
+        internal Acceptor(string! path)
+        {
+            this.servicePath = path;
+            this.controllers = new ArrayList();
+            this.controllersLock = new Object();
+        }
+
+        ~Acceptor()
+        {
+            // Unless Stop is invoked in advance.
+            if (serviceThread != null) {
+                Stop();
+            }
+            delete providerTRef.Acquire();
+        }
+
+        internal void Start()
+        {
+            if (servicePath == null || servicePath == String.Empty) {
+                throw new Exception("Service is not specified.");
+            }
+
+            RegisterToNameService();
+
+            // Initialize the inter-thread channel
+            ThreadTerminationContract.Imp! leader;
+            ThreadTerminationContract.Exp! terminal;
+            ThreadTerminationContract.NewChannel(out leader, out terminal);
+            leaderTRef = new TRef<ThreadTerminationContract.Imp:Start>(leader);
+            terminalTRef = new TRef<ThreadTerminationContract.Exp:Start>(terminal);
+            if (serviceThread == null) {
+                serviceThread = new Thread(new ThreadStart(Run));
+                serviceThread.Start();
+                DebugStub.Print("Acceptor: {0}\n",
+                                __arglist(serviceThread.ToString()));
+            }
+        }
+
+        internal void Stop()
+        {
+            ThreadTerminationContract.Imp:Start! leader;
+            leader = leaderTRef.Acquire();
+            leader.SendStop();
+            delete leader;
+            serviceThread.Join();
+            serviceThread = null;
+        }
+
+        /// <summary>
+        /// Service main loop.  Deals with client connection requests.
+        /// </summary>
+        private void Run()
+        {
+            ServiceProviderContract.Exp:Start!      provider;
+            ThreadTerminationContract.Exp:Start!    terminal;
+
+            provider = providerTRef.Acquire();
+            terminal = terminalTRef.Acquire();
+
+            for (;;) {
+                ServiceManagementContract.Exp:Start user;
+
+                switch receive {
+                    case provider.RecvConnect(serverEp):
+                        if (serverEp == null) {
+                            continue;
+                        }
+                        user = serverEp as ServiceManagementContract.Exp:Start;
+                        if (user == null) {
+                            provider.SendNackConnect(serverEp);
+                            continue;
+                        }
+                        else {
+                            Thread th = new Thread(new ThreadStart(NewController(user).Run));
+                            th.Start();
+                            provider.SendAckConnect();
+                        }
+                        DebugStub.Print("Acceptor: Client connected.\n");
+
+                        break;
+                    case provider.ChannelClosed():
+                        Clear();
+                        goto exit;
+                        break;
+                    case terminal.Stop():
+                        Clear();
+                        goto exit;
+                        break;
+                    case terminal.ChannelClosed():
+                        Clear();
+                        goto exit;
+                        break;
+                }
+            }
+exit:
+            delete terminal;
+            DeregisterFromNameService();
+            delete provider;
+        }
+
+        /// <summary>
+        /// Register ServiceControlContract to the name service.
+        /// </summary>
+        protected void RegisterToNameService()
+        {
+            bool success;
+            DirectoryServiceContract.Imp rootNS;
+            ServiceProviderContract.Imp! providerClient;
+            ServiceProviderContract.Exp! providerServer;
+
+            ServiceProviderContract.NewChannel(out providerClient,
+                                               out providerServer);
+
+            // SMS is a client of NS.
+            rootNS = DirectoryService.NewClientEndpoint();
+            rootNS.SendRegister(Bitter.FromString2(servicePath),
+                                providerClient);
+            switch receive {
+                case rootNS.RecvAckRegister():
+                    success = true;
+                    break;
+                case rootNS.RecvNakRegister(rejected, error):
+                    delete rejected;
+                    success = false;
+                    break;
+                case rootNS.ChannelClosed():
+                    success = false;
+                    break;
+            }
+            delete rootNS;
+
+            if (success == false) {
+                delete providerServer;
+                DebugStub.Break();
+                throw new Exception("Name registration failed.");
+            }
+
+            providerTRef = new TRef<ServiceProviderContract.Exp:Start>(providerServer);
+            DebugStub.WriteLine("SMS: NS Registered.");
+        }
+
+        protected void DeregisterFromNameService()
+        {
+            DirectoryServiceContract.Imp rootNS;
+
+            rootNS = DirectoryService.NewClientEndpoint();
+            rootNS.SendDeregister(Bitter.FromString2(servicePath));
+            switch receive {
+                case rootNS.AckDeregister(providerClient):
+                    delete providerClient;
+                    break;
+                case rootNS.NakDeregister(error):
+                    DebugStub.Print("SMS: Deregister failed.\n");
+                    break;
+                case rootNS.ChannelClosed():
+                    break;
+            }
+            delete rootNS;
+        }
+
+        /// <summary>
+        /// Create a new ServiceController object.
+        /// </summary>
+        private ServiceController! NewController([Claims]ServiceManagementContract.Exp:Start! ep)
+        {
+            ServiceController worker;
+           
+            worker = new ServiceController(this, ep);
+            lock (controllersLock) {
+                controllers.Add(worker);
+            }
+            return worker;
+        }
+
+        /// <summary>
+        /// Removes the worker from the list when Reception is terminated.
+        /// </summary>
+        internal void ReleaseController(ServiceController worker)
+        {
+            lock (controllersLock) {
+                controllers.Remove(worker);
+            }
+        }
+ 
+        private void Clear()
+        {
+            lock (controllersLock) {
+                // Stops all the workers
+                foreach (ServiceController worker in controllers) {
+                    if (worker == null) {
+                        continue;
+                    }
+                    worker.Stop();
+                }
+                controllers.Clear();
+                controllers = null;
+            }
+        }
+    }
+}

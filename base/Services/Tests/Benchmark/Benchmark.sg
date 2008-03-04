@@ -1,0 +1,82 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Service\Test\Benchmark\Benchmark.sg
+//
+//  Note:
+//
+using System;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Security;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+
+[assembly: Transform(typeof(ServiceResourceTransform))]
+[assembly: ApplicationPublisherAttribute("singularity.microsoft.com")]
+[assembly: AssertPrivilegeAttribute("$register-privilege.localhost")]
+
+namespace Microsoft.Singularity.Services.Benchmark
+{
+    [Category("Service")]
+    internal sealed class Parameters
+    {
+        [Endpoint]
+        public readonly TRef<ManagedServiceContract.Exp:Start> serviceRef;
+
+        [Endpoint]
+        public readonly TRef<DirectoryServiceContract.Imp:Ready> directoryRef;
+
+        [Endpoint]
+        public readonly TRef<ServiceProxyContract.Imp:Start> proxyRef;
+
+        reflective private Parameters();
+    }
+
+    public class Benchmark
+    {
+        private Thread manageThread;
+        private IRunnable! manageExec;
+
+        public Benchmark([Claims]ManagedServiceContract.Exp:Start! mep,
+                         [Claims]DirectoryServiceContract.Imp:Ready! dep)
+        {
+            IRunnable serviceExec = new BenchmarkExec(dep);
+            manageExec = new ManagementExec(mep, serviceExec);
+        }
+
+        public void Start()
+        {
+            DebugStub.Print("-- Benchmark service start\n");
+            manageThread = new Thread(new ThreadStart(manageExec.Run));
+            manageThread.Start();
+        }
+
+        internal static int AppMain(Parameters! config)
+        {
+            ManagedServiceContract.Exp:Start    mep;
+            DirectoryServiceContract.Imp:Ready  dep;
+
+            mep = ((!)config.serviceRef).Acquire();
+            dep = ((!)config.directoryRef).Acquire();
+            if (mep == null || dep == null) {
+                delete mep;
+                delete dep;
+                return -1;
+            }
+
+            Benchmark b = new Benchmark(mep, dep);
+            b.Start();
+
+            return 0;
+        }
+    }
+}

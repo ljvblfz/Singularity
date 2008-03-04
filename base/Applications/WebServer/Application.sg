@@ -1,0 +1,238 @@
+//////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Dispatcher.sg
+//
+//  Note:
+//     This file holds the Singularity-specific web app dispatcher that knows
+//     how to invoke web apps under Singularity.
+//
+
+using System;
+using System.Collections;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Runtime;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.V1.Services;
+using Microsoft.Singularity.WebApps;
+using Microsoft.Singularity.WebApps.Contracts;
+using System.Diagnostics;
+using System.Web;
+
+namespace Microsoft.Singularity.WebServer
+{
+    internal sealed class Application
+    {
+        private static Hashtable applications = new Hashtable();
+
+        public static Application FindOrCreateApplication(Request! request)
+        {
+            // For now, we have an extremely lame way of mapping from a request
+            // to the appropriate application.  We simply take the FilePath
+            // after the leading slash.  That better be the name of a launchable
+            // application.
+            //
+            // TODO: Eventually this will be based on manifests and the mapping
+            // configuration of the WebServer, passed to the WebServer at
+            // startup.
+
+            string filePath = request.GetFilePath();
+            string appName = filePath.Substring(1);
+
+            Application app = (Application) applications[appName];
+
+            if (app == null) {
+                // No races around inserting unstarted applications into the hashtable.
+                lock (applications) {
+                    // Perhaps it's there now.
+                    app = (Application) applications[appName];
+                    if (app == null) {
+                        app = new Application(appName);
+
+                        // Regardless of whether the app starts successfully,
+                        // record it in our set of applications.
+                        app.Start();
+                        applications[appName] = app;
+                    }
+                }
+            }
+            // If an app failed to start, we keep it in the hashtable so we
+            // don't keep re-trying on every client request.
+            return ((app != null && app.started)
+                    ? app
+                    : null);
+        }
+
+        private TRef<WebAppContract.Imp:ProcessingState> wrapAppConn;
+        private string! name;
+        private bool    started;
+
+        // statistics
+        private ulong totalServed = 0;
+        private ulong totalTime = 0;
+
+        public Application(string! name)
+        {
+            this.name = name;
+            this.started = false;
+            base();
+        }
+
+        public void Process(Request! request)
+        {
+            ulong startTime = Processor.CycleCount;
+
+            // Make a local request object
+            IHttpRequest localRequest = new LocalHttpRequest(request);
+
+            HttpRequestContract.Imp! reqConnImp;
+            HttpRequestContract.Exp! reqConnExp;
+            HttpRequestContract.NewChannel(out reqConnImp, out reqConnExp);
+
+            WebAppContract.Imp appConn = wrapAppConn.Acquire();
+
+            try {
+                // Start processing this request
+                appConn.SendProcess(reqConnImp);
+                appConn.RecvOK();
+            }
+            finally {
+                wrapAppConn.Release(appConn);
+            }
+
+            // Start servicing the request contract
+            RequestExporter.ServiceRequestChannel(localRequest, reqConnExp);
+
+            // Clean up
+            delete reqConnExp;
+
+            request.CloseConnection();
+
+            totalServed++;
+            totalTime += Processor.CycleCount - startTime;
+        }
+
+        public void Start()
+        {
+            string[] args = new string[1];
+
+            args[0] = name;
+
+            WebAppContract.Imp! appConnImp;
+            WebAppContract.Exp! appConnExp;
+            WebAppContract.NewChannel(out appConnImp, out appConnExp);
+
+            try {
+                Process child = new Process(args, (Endpoint * in ExHeap) appConnExp);
+                child.Start();
+                appConnImp.RecvWebAppReady();
+                wrapAppConn = new TRef<WebAppContract.Imp:ProcessingState>(appConnImp);
+            }
+            catch (Exception) {
+                // TODO: The exception story of Singularity needs work.  For now,
+                // just record the fact that this app won't start.
+                return;
+            }
+            started = true;
+        }
+
+        internal class RequestExporter
+        {
+            public static void ServiceRequestChannel(IHttpRequest! request, HttpRequestContract.Exp! conn)
+            {
+                bool done = false;
+
+                while(!done) {
+                    switch receive {
+                        case conn.GetUriPath() :
+                            conn.SendUriPath(Bitter.FromString2(request.GetUriPath()));
+                            break;
+
+                        case conn.GetQueryString() :
+                            conn.SendQueryString(Bitter.FromString(request.GetQueryString()));
+                            break;
+
+                        case conn.GetVerb() :
+                            conn.SendVerb(Bitter.FromString(request.GetVerb()));
+                            break;
+
+                        case conn.GetHeader(char[]! in ExHeap headerChars) :
+                            string headerName = Bitter.ToString(headerChars);
+                            delete headerChars;
+                            string headerVal = request.GetHeader(headerName);
+                            if (headerVal != null) {
+                                conn.SendHeaderValue(Bitter.FromString(headerVal));
+                            } else {
+                                conn.SendHeaderValue(null);
+                            }
+                            break;
+
+                        case conn.GetBody() :
+                            byte[] bodyData = request.GetBodyData();
+
+                            if (bodyData != null) {
+                                conn.SendBodyData(Bitter.FromByteArray(bodyData));
+                            } else {
+                                conn.SendBodyData(null);
+                            }
+                            break;
+
+                        case conn.GetRemoteAddress() :
+                            conn.SendRemoteAddress(Bitter.FromString(request.GetRemoteAddress()));
+                            break;
+
+                        case conn.SendStatus(int code, char[]! in ExHeap descChars) :
+                        {
+                            string description = Bitter.ToString(descChars);
+                            delete descChars;
+                            request.SendStatus(code, description);
+                            conn.SendOK();
+                        }
+                        break;
+
+                        case conn.SendHeader(char[]! in ExHeap nameChars, char[]! in ExHeap valChars) :
+                        {
+                            string name = Bitter.ToString(nameChars);
+                            delete nameChars;
+
+                            string value = Bitter.ToString(valChars);
+                            delete valChars;
+
+                            request.SendHeader(name, value);
+                            conn.SendOK();
+                        }
+                        break;
+
+                        case conn.SendBodyData(byte[]! in ExHeap dataBytes) :
+                        {
+                            request.SendBodyData(dataBytes);
+                            conn.SendOK();
+                        }
+                        break;
+
+                        case conn.Done() :
+                            request.Done();
+                            done = true;
+                            break;
+
+                        case conn.ChannelClosed() :
+                            // This is unexpected
+                            DebugStub.Break();
+                            done = true;
+                            break;
+
+                        case unsatisfiable :
+                            // This is even more unexpected
+                            DebugStub.Break();
+                            done = true;
+                            break;
+                    }
+                }
+            }
+        }
+    }
+}

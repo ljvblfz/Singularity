@@ -1,0 +1,18 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Settings.sg
+//
+//  Note:
+//
+
+namespace Microsoft.Singularity.Applications
+{
+    class Settings
+    {
+        public const int MaxThreads = 8;
+    }
+}

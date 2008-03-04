@@ -1,0 +1,113 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\Tests\Calculator\ServiceExec.sg
+//
+//  Note:   A generic worker-style server implementation
+//
+using System;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+
+namespace Microsoft.Singularity.Services
+{
+    // To inherit this class, what you need to do is:
+    // 1) To call the base constructor from your sub class.
+    // 2) To implement Listen method.
+    public abstract class ServiceExec : IRunnable
+    {
+        protected readonly string!                          path;
+        protected TRef<DirectoryServiceContract.Imp:Ready>  directoryRef;
+        protected TRef<ThreadTerminationContract.Exp:Start> signalRef;
+
+        /// <summary>
+        /// Waits for a client request.  An implementation of this method is
+        /// strongly recommended to handle the signal from the parent thread for
+        /// terminating the entire process.  Otherwise, the child thread leaks.
+        /// </summary>
+        protected abstract bool Listen(ServiceProviderContract.Exp:Start! provider,
+                                       ThreadTerminationContract.Exp:Start! signal);
+
+        public ServiceExec([Claims]DirectoryServiceContract.Imp:Ready! ep,
+                           string! path)
+        {
+            this.path = path;
+            this.directoryRef = new TRef<DirectoryServiceContract.Imp:Ready>(ep);
+        }
+
+        public void Signal([Claims]ThreadTerminationContract.Exp:Start! ep)
+        {
+            this.signalRef = new TRef<ThreadTerminationContract.Exp:Start>(ep);
+        }
+
+        public virtual void Run()
+        {
+            ServiceProviderContract.Exp!            provider;
+            ThreadTerminationContract.Exp:Start!    signal;
+
+            if (signalRef == null) {
+                throw new Exception("Signal is empty.");
+            }
+
+            if (!RegisterName(out provider)) {
+                delete provider;
+                return;
+            }
+
+            signal = signalRef.Acquire();
+            while (Listen(provider, signal));
+            signalRef.Release(signal);
+
+            DeregisterName(provider);
+        }
+
+        protected virtual bool RegisterName(out ServiceProviderContract.Exp! ep)
+        {
+            bool success = false;
+            DirectoryServiceContract.Imp:Ready! ds;
+            ServiceProviderContract.Imp!        imp;
+            ServiceProviderContract.Exp!        exp;
+
+            ds = directoryRef.Acquire();
+            ServiceProviderContract.NewChannel(out imp, out exp);
+            ds.SendRegister(Bitter.FromString2(path), imp);
+            switch receive {
+                case ds.AckRegister():
+                    success = true;
+                    break;
+                case ds.NakRegister(rejected, error):
+                    delete rejected;
+                    success = false;
+                    break;
+                case ds.ChannelClosed():
+                    success = false;
+                    break;
+            }
+            directoryRef.Release(ds);
+            ep = exp;
+            return success;
+        }
+
+        protected virtual void DeregisterName([Claims]ServiceProviderContract.Exp! ep)
+        {
+            DirectoryServiceContract.Imp:Ready! ds;
+            ds = directoryRef.Acquire();
+            ds.SendDeregister(Bitter.FromString2(path));
+            switch receive {
+                case ds.AckDeregister(imp):
+                    delete imp;
+                    delete ep;
+                    break;
+            }
+            directoryRef.Release(ds);
+        }
+    } // class
+}

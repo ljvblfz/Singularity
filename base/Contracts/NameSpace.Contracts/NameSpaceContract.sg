@@ -1,0 +1,59 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   DirectoryServiceContract.sg
+//
+
+using Microsoft.SingSharp;
+using Microsoft.Singularity.Channels;
+
+namespace Microsoft.Singularity.Directory
+{
+    public enum NodeType
+    {
+        Inner       = 0,
+        Dir         = 1,
+        Provider    = 2,
+        SymLink     = 3,
+        File        = 4,
+        IoMemory    = 5,
+    }
+
+    public rep struct FindResponse : ITracked
+    {
+        public char[]! in ExHeap Path;
+        public NodeType Type;
+    }
+
+    public contract DirectoryServiceContract : ServiceContract
+    {
+        // ReadOnly part
+
+        in     message Bind(char[]! in ExHeap path, ServiceContract.Exp:Start! exp);
+        out    message AckBind();
+        out    message NakBind(ServiceContract.Exp:Start exp); // return unconnected endpoint
+
+        in     message Notify(char[]! in ExHeap pathSpec, NotifyContract.Imp:Start! imp);
+        out    message AckNotify();
+        out    message NakNotify(NotifyContract.Imp:Start! imp); // return unconnected endpoint
+
+        in     message Find(char[]! in ExHeap pathSpec, char[]! in ExHeap pattern);
+        out    message AckFind(FindResponse[]! in ExHeap results);
+        out    message NakFind();
+
+        out message Success();
+
+        override state Start: one {
+            Success! -> Ready;
+        }
+        state Ready: one
+        {
+            Bind? ->    ( AckBind! or NakBind!  ) -> Ready;
+            Find? ->    ( AckFind! or NakFind!  ) -> Ready;
+            Notify? ->  ( AckNotify! or NakNotify! ) -> Ready;
+       }
+   }
+}

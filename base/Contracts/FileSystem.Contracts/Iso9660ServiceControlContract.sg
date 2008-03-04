@@ -1,0 +1,40 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+
+using System;
+using System.Collections;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Channels;
+
+namespace Microsoft.Singularity.FileSystem {
+	public contract Iso9660ServiceControlContract : ServiceContract {
+		
+		in message Initialize(char[] in ExHeap device);
+		out message AckInitialize();
+		out message NackInitialize();
+
+		in message Mount(char[] in ExHeap location);
+		out message AckMount();
+		out message NackMount();
+		
+		in message Unmount();
+		out message AckUnmount();
+		out message NackUnmount();
+		
+		out message Success();
+		
+		override state Start : one {
+			Success! -> Ready;
+		}
+		
+		state Ready : one {
+		    Initialize? -> (AckInitialize! or NackInitialize!) -> Ready;
+		    Mount? -> (AckMount! or NackMount!) -> Ready;
+		    Unmount? -> (AckUnmount! or NackUnmount!) -> Ready;
+		}
+	}
+}

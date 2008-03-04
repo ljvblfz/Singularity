@@ -1,0 +1,33 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Services\ServiceManager\DefaultService.sg
+//
+//  Note:   
+//
+using System;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Services.ServiceManager
+{
+    internal class DefaultService : Service
+    {
+        // protected readonly string! name;
+        // protected Process process;
+        // protected TRef<ManagedServiceContract.Imp:Ready> endpoint;
+
+        internal DefaultService(string! serviceName,
+                                string! binaryName,
+                                [Claims]DirectoryServiceContract.Imp:Ready! ds)
+        {
+            base(serviceName, binaryName, ServiceType.Default, ds);
+        }
+    }
+}

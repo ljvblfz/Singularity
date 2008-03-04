@@ -1,0 +1,38 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 9.00
+# Visual Studio 2005
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RunParallel", "RunParallel.csproj", "{8B471570-6DC4-4EF9-BC04-BF5A46476A4D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "nmake_dirs", "..\nmake_dirs\nmake_dirs.csproj", "{D24899E6-3650-40A9-92C5-D33FAC1D6ABD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WindowsInteropLib", "..\WindowsInteropLib\WindowsInteropLib.csproj", "{41BB2D74-0A52-47E9-9CE7-10E1EC04180D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "timerun", "..\timerun\timerun.csproj", "{FDED26D2-2F73-474C-BBA9-C8A5CC8E6967}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8B471570-6DC4-4EF9-BC04-BF5A46476A4D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B471570-6DC4-4EF9-BC04-BF5A46476A4D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B471570-6DC4-4EF9-BC04-BF5A46476A4D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B471570-6DC4-4EF9-BC04-BF5A46476A4D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D24899E6-3650-40A9-92C5-D33FAC1D6ABD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D24899E6-3650-40A9-92C5-D33FAC1D6ABD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D24899E6-3650-40A9-92C5-D33FAC1D6ABD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D24899E6-3650-40A9-92C5-D33FAC1D6ABD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{41BB2D74-0A52-47E9-9CE7-10E1EC04180D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41BB2D74-0A52-47E9-9CE7-10E1EC04180D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41BB2D74-0A52-47E9-9CE7-10E1EC04180D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41BB2D74-0A52-47E9-9CE7-10E1EC04180D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FDED26D2-2F73-474C-BBA9-C8A5CC8E6967}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FDED26D2-2F73-474C-BBA9-C8A5CC8E6967}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FDED26D2-2F73-474C-BBA9-C8A5CC8E6967}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FDED26D2-2F73-474C-BBA9-C8A5CC8E6967}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

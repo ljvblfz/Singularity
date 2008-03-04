@@ -1,0 +1,238 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Libraries\Resiliency\JournaletGroup.sg
+//
+//  Note:   
+//
+using System;
+using System.Collections;
+using System.Threading;
+using Microsoft.Singularity;
+
+namespace Microsoft.Singularity.Resiliency
+{
+    public class JournaletGroup : IEnumerable, IRecoveryAware, ICheckpoint
+    {
+        protected IRecoveryAware    parent;
+        protected bool              syncRequest; 
+        protected bool              recoveringState;
+        protected bool              checkpointingState = false;
+        protected Object!           recoveryLock;
+        protected IList!            journaletList;
+        protected Object!           listLock;
+        protected ManualResetEvent! syncEvent;
+
+        public JournaletGroup()
+        {
+            recoveryLock = new Object();
+            listLock = new Object();
+            journaletList = new ArrayList();
+            syncEvent = new ManualResetEvent(false);
+        }
+
+        /// 
+        /// Adds the specified journalet to the group
+        ///
+        public void Add(Journalet2 journalet)
+        {
+            if (journalet != null) {
+                lock (listLock) {
+                    journaletList.Add(journalet);
+                    journalet.Group = this;
+                }
+            }
+        }
+
+        ///
+        /// Removes the specified journalet from the group
+        ///
+        public void Remove(Journalet2 journalet)
+        {
+            if (journalet != null) {
+                lock (listLock) {
+                    journaletList.Remove(journalet);
+                    journalet.Group = null;
+                }
+            }
+        }
+
+        //
+        // Invoked either when the proxy starts up or when the recovery ends.
+        //
+        public void Start()
+        {
+            Journalet2 j;
+
+            DebugStub.Print("JournaletGroup: Enter Start\n");
+            DebugStub.Print("JournaletGroup: {0} journalets\n",
+                            __arglist(journaletList.Count));
+            syncRequest = false;
+            recoveringState = false;
+            lock (listLock) {
+                foreach (Object obj in journaletList) {
+                    if (obj == null) {
+                        break;
+                    }
+                    j = obj as Journalet2;
+                    if (j == null) {
+                        continue;
+                    }
+                    j.Start();
+                    DebugStub.Print("JournaletGroup: J started\n");
+                }
+            }
+        }
+
+        public void Stop()
+        {
+            Journalet2 j;
+            
+            recoveringState = true;  // to prevent subsequent recovery
+
+            lock (listLock) {
+                foreach (Object obj in journaletList) {
+                    if (obj == null) {
+                        break;
+                    }
+                    j = obj as Journalet2;
+                    if (j == null) {
+                        continue;
+                    }
+                    j.Stop();
+                }
+            }
+        }
+
+        public void Suspend()
+        {
+            Journalet2  journalet;
+
+            syncRequest = true;
+
+            lock (listLock) {
+                foreach (Object obj in journaletList) {
+                    if (obj == null) {
+                        break;
+                    }
+                    journalet = obj as Journalet2;
+                    if (journalet != null) {
+                        journalet.Suspend();
+                    }
+                }
+            }
+        }
+
+        public void Flush()
+        {
+            Journalet2  journalet;
+
+            lock (listLock) {
+                foreach (Object obj in journaletList) {
+                    if (obj == null) {
+                        break;
+                    }
+                    journalet = obj as Journalet2;
+                    if (journalet != null) {
+                        journalet.Flush();
+                    }
+                }
+            }
+        }
+
+        public void Resume()
+        {
+            syncRequest = false;
+            syncEvent.Set();
+        }
+
+        public bool SyncRequest
+        {
+            get { return syncRequest; }
+            private set {}
+        }
+
+        public ManualResetEvent! SyncEvent
+        {
+            get { return syncEvent; }
+            private set {}
+        }
+
+        internal IRecoveryAware Parent
+        {
+            get { return parent; }
+            set { parent = value; }
+        }
+
+        public void NotifyRecovery()
+        {
+            DebugStub.Print("JGroup: Enter NotifyRecovery\n");
+            // this doesn't immediately returns if the lock
+            // is already acquired.
+            //if (!Monitor.TryEnter(recoveryLock)) {
+            //    DebugStub.Print("JGroup: Exit NotifyRecovery\n");
+            //    return;
+            //}
+
+            lock (recoveryLock) {
+                if (recoveringState) {
+                    DebugStub.Print("JGroup: Exit NotifyRecovery\n");
+                    return;
+                }
+                else {
+                    recoveringState = true;
+                }
+            }
+
+            if (parent != null || !recoveringState) {
+                parent.NotifyRecovery();
+                //recoveringState = true;
+            }
+            //Monitor.Exit(recoveryLock);
+
+            DebugStub.Print("JGroup: Exit NotifyRecovery\n");
+        }
+
+        public void UpdateCheckpoint()
+        {
+            //DebugStub.Print("JGroup: Enter UpdateCheckpoint\n");
+            //Doesn't seem work
+            //if (!Monitor.TryEnter(recoveryLock)) {
+            //    DebugStub.Print("JGroup: Exit UpdateCheckpoint\n");
+            //    return;
+            //}
+            lock (recoveryLock) {
+                if (checkpointingState) {
+                    //DebugStub.Print("JGroup: Exit UpdateCheckpoint\n");
+                    return;
+                }
+                else {
+                    checkpointingState = true;
+                }
+            }
+
+            // Suspend all other journalets
+            Suspend();
+
+            // Notify to ServiceProviderProxy
+            if (parent != null) {
+                parent.UpdateCheckpoint();
+            }
+
+            checkpointingState = false;
+            // Resume the journalets
+            Resume();
+
+            //Monitor.Exit(recoveryLock);
+            //DebugStub.Print("JGroup: Exit UpdateCheckpoint\n");
+        }
+
+        public IEnumerator GetEnumerator()
+        {
+            return journaletList.GetEnumerator();
+        }
+    }
+}

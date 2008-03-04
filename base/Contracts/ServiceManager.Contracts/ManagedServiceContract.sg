@@ -1,0 +1,85 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Contracts\ServiceManager.Contracts\ServiceContract.sg
+//
+//  Note:   For service providers managed by Service Manager
+//
+using Microsoft.SingSharp;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+
+namespace Microsoft.Singularity.ServiceManager
+{
+    public contract ManagedServiceContract
+    {
+        out message Success();
+        out message Busy();
+        
+        in message Knock();
+        out message Alive();
+
+        in message StartService();
+        out message AckStartService();
+        out message NakStartService();
+
+        in message StopService();
+        out message AckStopService();
+
+        in message RestartService();
+        out message AckRestartService();
+
+        // Restart the service process
+        in message Restart();
+        out message AckRestart();
+
+        // Stop the service process
+        in message Stop();
+        out message AckStop();
+
+        state Start : one {
+            Success! -> Ready;
+        }
+
+        state Ready : one {
+            Knock? -> Alive! -> Ready;
+            StartService? -> (AckStartService! or NakStartService!) -> Ready;
+            RestartService? -> (AckRestartService! or Busy!) -> Ready;
+            StopService? -> (AckStopService! or Busy!) -> Ready;
+            Restart? -> AckRestart! -> Ready;
+
+            Stop? -> AckStop! -> Ready;
+        }
+    }
+
+    public contract ManagedProxyContract
+    {
+        out message Success();
+
+        in  message RequestRecovery();
+        out message AckRecovery(DirectoryServiceContract.Exp:Start! directory,
+                                ServiceProxyContract.Exp:Start! proxy);
+        out message NakRecovery();
+
+        in  message RequestDSRecovery();
+        out message AckDSRecovery(DirectoryServiceContract.Exp:Start! proxy);
+        out message NakDSRecovery();
+
+        // reports the end of recovery process to service manager
+        in  message EndOfRecovery();
+        out message AckEndOfRecovery();
+
+        state Start : one {
+            Success! -> Ready;
+        }
+
+        state Ready : one {
+            RequestRecovery? -> (AckRecovery! or NakRecovery!) -> Ready;
+            RequestDSRecovery? -> (AckDSRecovery! or NakDSRecovery!) -> Ready;
+            EndOfRecovery? -> AckEndOfRecovery! -> Ready;
+        }
+    }
+}

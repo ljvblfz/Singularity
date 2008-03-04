@@ -1,0 +1,110 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+
+using System;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Io;
+
+[assembly: Transform(typeof(ApplicationResourceTransform))]
+
+namespace Microsoft.Singularity.Applications.ServiceManager
+{
+    [ConsoleCategory(HelpMessage="TryEnter Test", DefaultAction=true)]
+    internal class DefaultConfig
+    {
+        [InputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Exp:READY> Stdin;
+        
+        [OutputEndpoint("data")]
+        public readonly TRef<UnicodePipeContract.Imp:READY> Stdout;
+
+        reflective internal DefaultConfig();
+
+        internal int AppMain()
+        {
+            return Main.AppMain(this);
+        }
+    }
+
+
+    internal class Worker
+    {
+        private Main!   parent;
+        private int     id;
+
+        internal Worker(Main! parent, int id)
+        {
+            this.parent = parent;
+            this.id = id;
+        }
+
+        internal void Run()
+        {
+            Console.WriteLine("Thread {0} start\n", id);
+            for (int i = 0; i < 10; i++) {
+                parent.Enter(id);
+                Thread.Sleep(100);
+            }
+            Console.WriteLine("Thread {0} end\n", id);
+        }
+    }
+
+    internal class Main
+    {
+        private Object! mutex = new Object();
+        private int     count = 0;
+
+        public void Start(int number)
+            requires number >= 0;
+        {
+            Thread![]   thread = new Thread![number];
+            Worker[]    worker = new Worker[number];
+
+            for (int i = 0; i < number; i++) {
+                worker[i] = new Worker(this, i);
+                thread[i] = new Thread(new ThreadStart(worker[i].Run));
+            }
+
+            for (int i = 0; i < number; i++) {
+                thread[i].Start();
+            }
+
+            for (int i = 0; i < number; i++) {
+                thread[i].Join();
+            }
+        }
+
+        internal void Enter(int id)
+        {
+            assert mutex != null;
+
+            Console.WriteLine("{0} try enter", id);
+            if (!Monitor.TryEnter(mutex)) {
+                // Never reached here
+                Console.WriteLine("{0} couldn't get monitor", id);
+                ++count;
+                return;
+            }
+            Console.WriteLine("{0} got monitor", id);
+            Thread.Sleep(1000);
+            Monitor.Exit(mutex);
+            Console.WriteLine("{0} exit (count: {1})", id, count);
+        }
+
+        internal static int AppMain(DefaultConfig! config)
+        {
+            new Main().Start(4);
+
+            return 0;
+        }
+    }
+}

@@ -1,0 +1,40 @@
+﻿<!--
+##############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+#   File:   Contracts\ServiceManager.Contracts\ServiceManager.Contracts.csproj
+#
+#   Note:
+#
+##############################################################################
+-->
+
+
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\Paths.targets" />
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>ServiceManager.Contracts</AssemblyName>
+    <GenerateContractMap>true</GenerateContractMap>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ManagedServiceContract.sg" />
+    <Compile Include="ServiceControlContract.sg" />
+    <Compile Include="ServiceManagementContract.sg" />
+    <Compile Include="ThreadTerminationContract.sg" />
+    <Compile Include="BenchmarkContract.sg" />
+    <Compile Include="ServiceProxyContract.sg" />
+    <Compile Include="GameContract.sg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Directory.Contracts\Directory.Contracts.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\App.targets" />
+</Project>

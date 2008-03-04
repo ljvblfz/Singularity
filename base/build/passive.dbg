@@ -1,0 +1,15 @@
+* This script contains commands that can be executed in
+* automated bvts when the debugger halts for user input during
+* automated tests.
+lsa @eip
+r
+rF
+.lines -e
+kp
+.frame 0
+dv
+.frame 1
+dv
+.frame 2
+dv
+q

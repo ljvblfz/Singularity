@@ -1,0 +1,17 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\Paths.targets" />
+
+  <ItemGroup>
+    <ProjectReference Include="CredentialsManager\CredentialsManagerService.csproj" />
+    <ProjectReference Include="Fat\Fat.proj" />
+    <ProjectReference Include="Iso9660\Iso9660.csproj" />
+    <ProjectReference Include="NetStack\NetStackService.csproj" />
+    <ProjectReference Include="ServiceManager\ServiceManager.csproj" />
+    <ProjectReference Include="Smb\Smb.proj" />
+    <ProjectReference Include="Tests\Tests.csproj" />
+    <ProjectReference Include="Transforms\ServiceTransform.csproj" />
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\Dirs.targets" />
+
+</Project>

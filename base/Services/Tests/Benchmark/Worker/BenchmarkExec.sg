@@ -1,0 +1,190 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Service\Test\Benchmark\Worker\BenchmarkExec.sg
+//
+//  Note:
+//
+using System;
+using System.Collections;
+using System.Threading;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.ServiceManager;
+using Microsoft.Singularity.Services;
+
+namespace Microsoft.Singularity.Services.Benchmark
+{
+    public class BenchmarkExec : IRunnable
+    {
+        private ArrayList!  serviceSignalList;
+        private Object!     mutex;
+        private TRef<ThreadTerminationContract.Exp:Start>   signalReceiver;
+        private TRef<DirectoryServiceContract.Imp:Ready>!   directoryService;
+
+        public BenchmarkExec([Claims]DirectoryServiceContract.Imp:Ready! ds)
+        {
+            serviceSignalList = new ArrayList();
+            mutex = new Object();
+            directoryService = new TRef<DirectoryServiceContract.Imp:Ready>(ds);
+        }
+
+        public void Signal([Claims]ThreadTerminationContract.Exp:Start! ep)
+        {
+            signalReceiver = new TRef<ThreadTerminationContract.Exp:Start>(ep);
+        }
+
+        public virtual void Run()
+        {
+            ServiceProviderContract.Exp!        provider;
+            ThreadTerminationContract.Exp!      signal;
+
+            DebugStub.Print("BenchExec: Service start\n");
+
+            if (!RegisterName(BenchmarkContract.ModuleName, out provider)) {
+                delete provider;
+                return;
+            }
+            assert signalReceiver != null;
+            signal = signalReceiver.Acquire();
+            for (;;) {
+                switch receive {
+                    case provider.Connect(serviceEp):
+                    {
+                        //DebugStub.Print("BenchExec: Accepting a client" +
+                        //                " connection request ... ");
+                        BenchmarkContract.Exp:Start bench = serviceEp
+                                as BenchmarkContract.Exp:Start;
+                        if (bench != null) {
+                            //DebugStub.Print("accepted.\n");
+                            provider.SendAckConnect();
+                            CreateWorker(bench).Start();
+                        }
+                        else {
+                            //DebugStub.Print("Denied.\n");
+                            provider.SendNackConnect(serviceEp);
+                        }
+                        break;
+                    }
+                    case provider.ChannelClosed():
+                    {
+                        TerminateWorkers();
+                        goto exit;
+                        break;
+                    }
+                    case signal.Stop():
+                    {
+                        TerminateWorkers();
+                        signal.SendAckStop();
+                        goto exit;
+                        break;
+                    }
+                    case signal.ChannelClosed():
+                    {
+                        TerminateWorkers();
+                        goto exit;
+                        break;
+                    }
+                }
+            }
+exit:
+            signalReceiver.Release(signal);
+            DeregisterName(BenchmarkContract.ModuleName, provider);
+            return;
+        }
+
+        private Thread! CreateWorker([Claims]BenchmarkContract.Exp:Start! ep)
+        {
+            BenchmarkWorker service;
+            ThreadTerminationContract.Imp! imp;
+            ThreadTerminationContract.Exp! exp;
+            ThreadTerminationContract.NewChannel(out imp, out exp);
+
+            ep.SendSuccess();
+            service = new BenchmarkWorker(ep);
+            service.Signal(exp);
+            lock (mutex) {
+                serviceSignalList.Add(new TRef<ThreadTerminationContract.Imp:Start>(imp));
+            }
+            return new Thread(new ThreadStart(service.Run));
+        }
+
+        private void TerminateWorkers()
+        {
+            TRef<ThreadTerminationContract.Imp:Start>   signalRef;
+            ThreadTerminationContract.Imp:Start         signal;
+            lock (mutex) {
+                foreach (Object obj in serviceSignalList)
+                {
+                    if (obj != null) {
+                        signalRef = obj
+                                as TRef<ThreadTerminationContract.Imp:Start>;
+                        if (signalRef != null) {
+                            signal = signalRef.Acquire();
+                            signal.SendStop();
+                            switch receive {
+                                case signal.AckStop():
+                                    break;
+                                case signal.ChannelClosed():
+                                    break;
+                            }
+                            signalRef.Release(signal);
+                        }
+                    }
+                }
+                serviceSignalList.Clear();
+            }
+        }
+
+        internal bool RegisterName(string! name,
+                                   out ServiceProviderContract.Exp! ep)
+        {
+            bool success = false;
+            ServiceProviderContract.Imp!        imp;
+            ServiceProviderContract.Exp!        exp;
+            DirectoryServiceContract.Imp:Ready! ds;
+
+            ServiceProviderContract.NewChannel(out imp, out exp);
+            ds = directoryService.Acquire();
+            ds.SendRegister(Bitter.FromString2(name), imp);
+            switch receive {
+                case ds.AckRegister():
+                    success = true;
+                    DebugStub.Print("BenchExec: '{0}' registered",
+                                    __arglist(name));
+                    break;
+                case ds.NakRegister(rejected, error):
+                    delete rejected;
+                    success = false;
+                    DebugStub.Print("BenchExec: registration failed.\n");
+                    break;
+                case ds.ChannelClosed():
+                    DebugStub.Print(" ChannelClosed @ name service\n");
+                    break;
+            }
+            ep = exp;
+            directoryService.Release(ds);
+            return success;
+        }
+
+        internal void DeregisterName(string! name,
+                                     [Claims]ServiceProviderContract.Exp! ep)
+        {
+            DirectoryServiceContract.Imp:Ready! ds;
+            ds = directoryService.Acquire();
+            ds.SendDeregister(Bitter.FromString2(name));
+            switch receive {
+                case ds.AckDeregister(imp):
+                    delete imp;
+                    delete ep;
+                    break;
+            }
+            directoryService.Release(ds);
+        }
+    }
+}

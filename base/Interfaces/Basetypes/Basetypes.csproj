@@ -1,0 +1,103 @@
+﻿<!--
+##############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+#   File:   Interfaces\BaseTypes\Makefile
+#
+#   Note:
+#
+##############################################################################
+-->
+
+
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\Paths.targets" />
+
+  <PropertyGroup>
+    <AssemblyName>Basetypes</AssemblyName>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoStdLib>true</NoStdLib>
+    <InterfaceAssemblyIsKey>true</InterfaceAssemblyIsKey>
+  </PropertyGroup>
+
+
+  <ItemGroup>
+    <Compile Include="ArgumentException.csi" />
+    <Compile Include="ArgumentNullException.csi" />
+    <Compile Include="ArgumentOutOfRangeException.csi" />
+    <Compile Include="ArithmeticException.csi" />
+    <Compile Include="DivideByZeroException.csi" />
+    <Compile Include="Exception.csi" />
+    <Compile Include="IndexOutOfRangeException.csi" />
+    <Compile Include="InvalidCastException.csi" />
+    <Compile Include="InvalidOperationException.csi" />
+    <Compile Include="NullReferenceException.csi" />
+    <Compile Include="OutOfMemoryException.csi" />
+    <Compile Include="OverflowException.csi" />
+    <Compile Include="StackOverflowException.csi" />
+    <Compile Include="SystemException.csi" />
+
+    <Compile Include="ICloneable.csi" />
+    <Compile Include="ICollection.csi" />
+    <Compile Include="IComparable.csi" />
+    <Compile Include="IComparer.csi" />
+    <Compile Include="IDisposable.csi" />
+    <Compile Include="IEnumerable.csi" />
+    <Compile Include="IEnumerator.csi" />
+    <Compile Include="IFormattable.csi" />
+    <Compile Include="IList.csi" />
+
+    <Compile Include="AssemblyAttributes.csi" />
+    <Compile Include="Attribute.csi" />
+    <Compile Include="AttributeTargets.csi" />
+    <Compile Include="AttributeUsageAttribute.csi" />
+    <Compile Include="CompilerServicesAttributes.csi" />
+    <Compile Include="DefaultMemberAttribute.csi" />
+    <Compile Include="FlagsAttribute.csi" />
+
+    <Compile Include="Array.csi" />
+    <Compile Include="Boolean.csi" />
+    <Compile Include="Byte.csi" />
+    <Compile Include="Char.csi" />
+    <Compile Include="DateTime.csi" />
+    <Compile Include="Decimal.csi" />
+    <Compile Include="Delegate.csi" />
+    <Compile Include="Double.csi" />
+    <Compile Include="Enum.csi" />
+    <Compile Include="Int16.csi" />
+    <Compile Include="Int32.csi" />
+    <Compile Include="Int64.csi" />
+    <Compile Include="IntPtr.csi" />
+    <Compile Include="Monitor.csi" />
+    <Compile Include="MulticastDelegate.csi" />
+    <Compile Include="Object.csi" />
+    <Compile Include="RuntimeArgumentHandle.csi" />
+    <Compile Include="RuntimeTypeHandle.csi" />
+    <Compile Include="SByte.csi" />
+    <Compile Include="SchedulerTime.csi" />
+    <Compile Include="Single.csi" />
+    <Compile Include="String.csi" />
+    <Compile Include="TimeSpan.csi" />
+    <Compile Include="Type.csi" />
+    <Compile Include="TypeCode.csi" />
+    <Compile Include="TypedReference.csi" />
+    <Compile Include="UInt16.csi" />
+    <Compile Include="UInt32.csi" />
+    <Compile Include="UInt64.csi" />
+    <Compile Include="UIntPtr.csi" />
+    <Compile Include="ValueType.csi" />
+
+    <Compile Include="RuntimeType.csi" />
+    <Compile Include="VTable.csi" />
+    <Compile Include="BartokRT.csi" />
+    <Compile Include="BartokAttributes.csi" />
+
+    <Compile Include="BaseTypes.csi" />
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\InterfaceAssembly.targets" />
+</Project>

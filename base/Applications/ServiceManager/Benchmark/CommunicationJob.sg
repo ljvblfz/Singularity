@@ -1,0 +1,128 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File: Applications\ServiceManager\Benchmark\CommunicationJob.sg
+//
+//  Note:
+//
+using System;
+using System.Threading;
+using System.Text;
+using Microsoft.SingSharp;
+using Microsoft.Singularity;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Io;
+using Microsoft.Singularity.Services;
+using Microsoft.Singularity.ServiceManager;
+
+namespace Microsoft.Singularity.Applications.ServiceManager
+{
+    internal class CommunicationJob : Job
+    {
+        private const int   MaxSamples = 100;
+        private ulong[,]   time = new ulong[3, MaxSamples];
+        private ulong       outgoing;
+        private ulong       incoming;
+        private ulong       outTotal;
+        private ulong       inTotal;
+
+        internal CommunicationJob(BenchmarkServerInfo! info)
+        {
+            base(info);
+        }
+
+        internal override bool Run()
+        {
+            bool    success = false;
+            ulong   time1, time2, time3;
+
+            BenchmarkContract.Imp:Ready! ep;
+            if (!base.Bind(out ep)) {
+                success = false;
+                goto exit;
+            }
+
+            Console.WriteLine("CommunicationJob start");
+            DebugStub.WriteLine("-- CommunicationJob start");
+
+            time[0, 0] = Processor.GetCycleCount();
+            ep.SendGetCycleCount();
+            switch receive {
+                case ep.CycleCount(number):
+                    time[2, 0] = Processor.GetCycleCount();
+                    time[1, 0] = number;
+                    break;
+                case ep.ChannelClosed():
+                    Console.WriteLine("ChannelClosed @ comm\n");
+                    success = false;
+                    goto exit;
+                    break;
+            }
+
+            for (int i = 1; i < MaxSamples; i++) {
+                time[0, i] = Processor.GetCycleCount();
+                ep.SendGetCycleCount();
+                switch receive {
+                    case ep.CycleCount(number):
+                        time[2, i] = Processor.GetCycleCount();
+                        time[1, i] = number;
+                        break;
+                    case ep.ChannelClosed():
+                        Console.WriteLine("ChannelClosed @ comm\n");
+                        success = false;
+                        goto exit;
+                        break;
+                }
+            }
+
+            ep.SendEndOfBenchmark();
+            switch receive {
+                case ep.AckEnd():
+                    break;
+                case ep.ChannelClosed():
+                    break;
+            }
+
+            for (int i = 0; i < MaxSamples; i++) {
+                outTotal += (time[1, i] - time[0, i]);
+                inTotal += (time[2, i] - time[1, i]);
+            }
+            outgoing = outTotal / MaxSamples;
+            incoming = inTotal / MaxSamples;
+
+            success = true;
+exit:
+            delete ep;
+            return success;
+        }
+
+        public override String! ToString()
+        {
+            StringBuilder builder = new StringBuilder();
+
+            builder.Append("-- Communication Test Result (");
+            builder.Append(MaxSamples);
+            builder.Append(" samples) --\n");
+            builder.Append("No.  Cycle Count  Cycle Count  Cycle Count\n");
+            builder.Append("---  -----------  -----------  -----------\n");
+            for (int i = 0; i < 10; i++) {
+                builder.AppendFormat("{0, 3}  {1, 11}  {2, 11}  {3, 11}\n",
+                               i, time[0, i], time[1, i], time[2, i]);
+            }
+            builder.Append("\n");
+            builder.Append("Direction   TotalCycles  Average\n");
+            builder.Append("---------   -----------  -------\n");
+            builder.AppendFormat("Outgoing    {0, 11}  {1, 7}\n",
+                                 outTotal, outgoing);
+            builder.AppendFormat("Incoming    {0, 11}  {1, 7}\n",
+                                 inTotal, incoming);
+            builder.AppendFormat("Round-trip  {0, 11}  {1, 7}\n",
+                                 outTotal + inTotal, outgoing + incoming);
+
+            return builder.ToString();
+        }
+    }
+}

@@ -1,0 +1,181 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+//  Microsoft Research Singularity
+//
+//  Copyright (c) Microsoft Corporation.  All rights reserved.
+//
+//  File:   Fat\Control\Utilities.sg
+//
+//  Note:
+//
+
+using System;
+
+using Microsoft.SingSharp;
+using Microsoft.SingSharp.Reflection;
+
+using Microsoft.Singularity.Applications;
+using Microsoft.Singularity.Channels;
+using Microsoft.Singularity.Configuration;
+using Microsoft.Singularity.Directory;
+using Microsoft.Singularity.Io;
+
+using Microsoft.Singularity.Services.Fat.Contracts;
+
+namespace Microsoft.Singularity.Services.Fat.FatControl
+{
+    internal class Utilities
+    {
+        internal static FatControlContract.Imp ConnectToManager()
+        {
+            DirectoryServiceContract.Imp! dsExp =
+                DirectoryService.NewClientEndpoint();
+
+            FatControlContract.Imp! fccImp;
+            FatControlContract.Exp! fccExp;
+            FatControlContract.NewChannel(out fccImp, out fccExp);
+            try {
+                dsExp.SendBind(
+                    Bitter.FromString2(
+                        FatControlContract.ManagerControlPath
+                        ),
+                    fccExp);
+
+                switch receive {
+                    case dsExp.AckBind():
+                        return ReceiveSuccess(fccImp);
+
+                    case dsExp.NakBind(exp, ErrorCode):
+                        Console.WriteLine(
+                            "Connection to {0} was rejected.",
+                            FatControlContract.ManagerControlPath
+                            );
+                        delete exp;
+                        break;
+
+                    case dsExp.ChannelClosed():
+                        Console.WriteLine(
+                            "Lost directory service connection."
+                            );
+                        break;
+                }
+                delete fccImp;
+                return null;
+            }
+            finally {
+                delete dsExp;
+            }
+        }
+
+        private static FatControlContract.Imp
+        ReceiveSuccess([Claims] FatControlContract.Imp! imp)
+        {
+            switch receive {
+                case imp.RecvSuccess():
+                    return imp;
+                case imp.ChannelClosed():
+                    Console.WriteLine(
+                        "Connection to {0} was lost.",
+                        FatControlContract.ManagerControlPath
+                        );
+                    break;
+            }
+
+            delete imp;
+            return null;
+        }
+
+        internal struct Quantity
+        {
+            internal ulong  Unit;
+            internal string Suffix;
+
+            internal Quantity(ulong u, string s)
+            {
+                Unit   = u;
+                Suffix = s;
+            }
+
+            internal static readonly Quantity []! Known = new Quantity [] {
+                new Quantity(1152921504606846976, "EiB"),
+                new Quantity(112589990684262, "PiB"),
+                new Quantity(1099511627776, "TiB"),
+                new Quantity(1073741824, "GiB"),
+                new Quantity(1048576, "MiB"),
+                new Quantity(1024, "KiB"),
+            };
+        }
+
+        internal static string GetPrettySizeString(ulong diskSize)
+        {
+            string suffix = "B";
+            ulong  divisor = 1;
+
+            Quantity [] quantities = Quantity.Known;
+
+            for (int i = 0; i < quantities.Length; i++) {
+                if (diskSize >= 1 * quantities[i].Unit) {
+                    divisor = quantities[i].Unit;
+                    suffix  = quantities[i].Suffix;
+                    break;
+                }
+            }
+            return String.Format("{0:F0} {1}",
+                                 (float)diskSize / (float)divisor, suffix);
+        }
+
+        internal static void DisplayError(FatContractErrorCode e)
+        {
+            string message = "unknown";
+            switch (e) {
+                case FatContractErrorCode.NoError:
+                    message = "no error";
+                    break;
+                case FatContractErrorCode.DiskUnavailable:
+                    message = "disk unavailable";
+                    break;
+                case FatContractErrorCode.PathUnavailable:
+                    message = "path unavailable";
+                    break;
+                case FatContractErrorCode.Busy:
+                    message = "filesystem busy";
+                    break;
+                case FatContractErrorCode.NotMounted:
+                    message = "path not mounted";
+                    break;
+                case FatContractErrorCode.InternalError:
+                    message = "internal error";
+                    break;
+                case FatContractErrorCode.NotFatPartition:
+                    message = "not a FAT partition";
+                    break;
+                case FatContractErrorCode.ReadFailed:
+                    message = "read error";
+                    break;
+                case FatContractErrorCode.BadBPB:
+                    message = "bad boot parameter block";
+                    break;
+                case FatContractErrorCode.ReadOnlyDisk:
+                    message = "read only disk";
+                    break;
+                case FatContractErrorCode.InvalidStartSector:
+                    message = "invalid start sector";
+                    break;
+                case FatContractErrorCode.InvalidFormatSettings:
+                    message = "invalid format settings";
+                    break;
+                case FatContractErrorCode.InvalidVolumeLabel:
+                    message = "invalid volume label";
+                    break;
+            }
+            Console.WriteLine("Failed: {0}.", message);
+        }
+
+        internal static void DisplayChannelClosedError()
+        {
+            Console.WriteLine(
+                "Failed: Channel to FAT client manager closed unexpectedly."
+                );
+        }
+    }
+}

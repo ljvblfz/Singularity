@@ -1,0 +1,96 @@
+msg = '[BVT 0.0] Running page table test.'
+echo $msg
+decho $msg
+dumppages
+
+msg = '[BVT 0.1] Running Pnp test.'
+echo $msg
+decho $msg
+if (false) {
+    pnp
+    pnp
+    pnp
+}
+dumppages
+
+msg = '[BVT 0.2] Running channel test.'
+echo $msg
+decho $msg
+channeldemo
+channeldemo
+channeldemo
+dumppages
+
+msg = '[BVT 0.3] Running ram disk contents test.'
+echo $msg
+decho $msg
+if (false) {
+    disk
+    disk
+    disk
+}
+dumppages
+
+msg = '[BVT 0.4] Running sound driver test.'
+echo $msg
+decho $msg
+play
+play
+play
+dumppages
+
+msg = '[BVT 0.5] Running select test.'
+echo $msg
+decho $msg
+select
+select
+select
+dumppages
+
+msg = '[BVT 0.6] Running thread test.'
+echo $msg
+decho $msg
+threadtest
+threadtest
+threadtest
+dumppages
+
+msg = '[BVT 0.7] Running mptxofy test.'
+echo $msg
+decho $msg
+if (false) {
+    mptxofy
+}
+
+msg = '[BVT 0.8] Running tasklist.'
+echo $msg
+decho $msg
+tasklist
+dumppages
+
+msg = '[BVT 0.9] Running exception test.'
+echo $msg
+decho $msg
+throw
+throwwithlinkstack
+
+msg = '[BVT .10] Running suspend/stop test.'
+echo $msg
+decho $msg
+arg1 = '(& p2 (* 9999999 print 2 delay 2 ) wall )'
+arg2 = ' (* 5 print 1 delay 2 ) suspend p2'
+arg3 = ' (* 5 print 1 delay 2 ) resume p2'
+arg4 = ' (* 5 print 1 delay 2 ) stop p2'
+arg5 = ' (* 5 print 1 delay 2 )'
+arg = $arg1 . $arg2 . $arg3 . $arg4 . $arg5
+kptest $arg
+
+msg = '[BVT 0.11] Running singbench test.'
+echo $msg
+decho $msg
+singbench
+
+msg = '[BVT 0.12] Running warmboot test.'
+echo $msg
+decho $msg
+warmboot

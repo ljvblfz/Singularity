@@ -1,0 +1,74 @@
+<!--
+##############################################################################
+#
+#   Microsoft Research Singularity
+#
+#   Copyright (c) Microsoft Corporation.  All rights reserved.
+#
+#   File:   Kernel\SingSharp.Runtime\Microsoft.SingSharp.Runtime.App.csproj
+#
+#   Note:   This project builds the copy of Microsoft.SingSharp.Runtime.dll
+#           that applications use (executables outside of the kernel).
+#
+#
+##############################################################################
+
+Notes:
+
+This assembly is one of the more difficult ones to get to build correctly.
+Ordinarily, SGC implicitly adds a reference to this assembly; after all, it's
+part of the runtime environment that Sing# provides..  So, since we're building
+this assembly, we certainly don't want to reference the same assembly.
+To prevent this from happening, we must pass the /nostdlib flag.
+
+However, we do need to reference the standard library, Corlib.dll.  To do this,
+we ALSO pass /stdlib:...\Corlib.dll to SGC.  We achieve this by setting 
+NoStdLib=false, so that App.targets and SingSharp.targets will build and pass the 
+/stdlib flag.
+But that means that the /nostdlib flag will NOT be passed.  So we use the
+ExtraCompilerFlags property to sneak in /nostdlib, as well.  Not pretty.
+
+-->
+
+<Project DefaultTarget="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <Import Project="..\..\Paths.targets"/>
+
+  <PropertyGroup>
+    <AssemblyName>Microsoft.SingSharp.Runtime</AssemblyName>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>NOOWNERSHIPCHECK;NODEFAULTLIB</DefineConstants>
+    <NoStdlib>true</NoStdlib>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Attributes.cs"/>
+    <Compile Include="Bitter.sg"/>
+    <Compile Include="Classes.ssc"/>
+    <Compile Include="CustomAllocator.sg"/>
+    <Compile Include="ESet.sg"/>
+    <Compile Include="Endpoint.sg"/>
+    <Compile Include="EMap.sg"/>
+    <Compile Include="ExHeap.sg"/>
+    <Compile Include="ExRef.sg"/>
+    <Compile Include="StateStack.sg"/>
+    <Compile Include="TContainer.sg"/>
+    <Compile Include="TQueue.sg"/>
+    <Compile Include="TRef.sg"/>
+    <Compile Include="VectorQueue.sg"/>
+    <Compile Include="AssemblyInfo.cs"/>
+    <Compile Include="Reflection\Attributes.cs"/>
+    <Compile Include="Reflection\Classes.cs"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(SINGULARITY_ROOT)\Interfaces\Singularity.V1\Singularity.V1.csproj"/>
+    <ProjectReference Include="..\System.Compiler.Runtime\System.Compiler.Runtime.App.csproj"/>
+    <ProjectReference Include="..\App.Corlib.csproj"/>
+  </ItemGroup>
+
+  <Import Project="$(SINGULARITY_ROOT)\Targets\AppRuntime.targets"/>
+
+</Project>
+

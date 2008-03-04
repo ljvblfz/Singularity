@@ -1,0 +1,45 @@
+Microsoft Visual Studio Solution File, Format Version 9.00
+# Visual Studio 2005
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kernel.System.Threading", "Kernel\System\Threading\Kernel.System.Threading.csproj", "{935799DC-052C-4C55-B8DA-9BF3CBF92F6C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kernel.System.GCs", "Kernel\System\GCs\Kernel.System.GCs.csproj", "{37CE9734-90C1-45FC-AB73-C7297C9F11F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kernel.Singularity", "Kernel\Singularity\Kernel.Singularity.csproj", "{60519714-BB97-41D6-99A7-B54E8A2DB256}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kernel.Singularity.Loader", "Kernel\Singularity\Loader\Kernel.Singularity.Loader.csproj", "{938DEBC9-6C94-473D-9C5A-93CE4B95A149}"
+EndProject
+Project("{2D5F3EBF-B93A-4468-B236-4C125BB2FD8A}") = "Drivers", "Drivers\Drivers.sgproj", "{456B154B-E19C-499C-9200-0166873D2209}"
+EndProject
+Project("{2D5F3EBF-B93A-4468-B236-4C125BB2FD8A}") = "Contracts", "Contracts\Contracts.sgproj", "{9C6EC9FE-2F65-4DEE-A31D-58E928641CA2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{935799DC-052C-4C55-B8DA-9BF3CBF92F6C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{935799DC-052C-4C55-B8DA-9BF3CBF92F6C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{935799DC-052C-4C55-B8DA-9BF3CBF92F6C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{935799DC-052C-4C55-B8DA-9BF3CBF92F6C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{37CE9734-90C1-45FC-AB73-C7297C9F11F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{37CE9734-90C1-45FC-AB73-C7297C9F11F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{37CE9734-90C1-45FC-AB73-C7297C9F11F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{37CE9734-90C1-45FC-AB73-C7297C9F11F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{60519714-BB97-41D6-99A7-B54E8A2DB256}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{60519714-BB97-41D6-99A7-B54E8A2DB256}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{60519714-BB97-41D6-99A7-B54E8A2DB256}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{60519714-BB97-41D6-99A7-B54E8A2DB256}.Release|Any CPU.Build.0 = Release|Any CPU
+		{938DEBC9-6C94-473D-9C5A-93CE4B95A149}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{938DEBC9-6C94-473D-9C5A-93CE4B95A149}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{938DEBC9-6C94-473D-9C5A-93CE4B95A149}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{938DEBC9-6C94-473D-9C5A-93CE4B95A149}.Release|Any CPU.Build.0 = Release|Any CPU
+		{456B154B-E19C-499C-9200-0166873D2209}.Debug|Any CPU.ActiveCfg = Debug|.NET
+		{456B154B-E19C-499C-9200-0166873D2209}.Release|Any CPU.ActiveCfg = Release|.NET
+		{9C6EC9FE-2F65-4DEE-A31D-58E928641CA2}.Debug|Any CPU.ActiveCfg = Debug|.NET
+		{9C6EC9FE-2F65-4DEE-A31D-58E928641CA2}.Release|Any CPU.ActiveCfg = Release|.NET
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
