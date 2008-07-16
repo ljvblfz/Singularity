@@ -267,9 +267,6 @@ const NO_ABS:int; // the value "none"
 // which is chosen when A is allocated, and never changes afterwards.
 function numFields(abs:int) returns (int);
 
-// REVIEW: this axiom is redundant
-axiom (forall t:int::{numFields(t)} numFields(t) > 0);
-
 // $AbsMem represents of the abstract graph's edges: for abstract node A
 // and field j, $AbsMem[A][j] is the abstract node pointed to by A's field j.
 // Do not modify $AbsMem directly!  $AbsMem is controlled by the mutator.
