@@ -1,4 +1,0 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<application name="testpe" processes="1">
-  <process id="0" main="true" path="testpe.x86" cache="testpe.x86" categories="0"/>
-</application>

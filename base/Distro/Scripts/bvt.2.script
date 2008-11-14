@@ -1,9 +1,0 @@
-msg = '[BVT 2.0] Running page table test.'
-echo $msg
-decho $msg
-dumppages
-
-msg = '[BVT 2.1] Running shutdown test.'
-echo $msg
-decho $msg
-shutdown

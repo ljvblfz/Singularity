@@ -1,1 +1,0 @@
-These tests are copied from the Bartok source tree.
