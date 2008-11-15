@@ -3,18 +3,18 @@
   <Import Project="..\..\Paths.targets"/>
 
   <PropertyGroup>
-    <AS16>$(BUILDDIR)\x86_x86\ml.exe</AS16>
-    <LINK16>$(BUILDDIR)\x86_x86\link16.exe</LINK16>
-    <AS64>$(SINGULARITY_ROOT)\build\x86_x64\ml64.exe</AS64>
-    <CC64>$(SINGULARITY_ROOT)\build\x86_x64\cl.exe</CC64>
-    <LINK64>$(SINGULARITY_ROOT)\build\x86_x64\link.exe</LINK64>
+    <AS16>&quot;$(BUILDDIR)\x86_x86\ml.exe&quot;</AS16>
+    <LINK16>for %%f in (&quot;$(BUILDDIR)\x86_x86\link16.exe&quot;) do %%~sf</LINK16>
+    <AS64>&quot;$(SINGULARITY_ROOT)\build\x86_x64\ml64.exe&quot;</AS64>
+    <CC64>&quot;$(SINGULARITY_ROOT)\build\x86_x64\cl.exe&quot;</CC64>
+    <LINK64>&quot;$(SINGULARITY_ROOT)\build\x86_x64\link.exe&quot;</LINK64>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Machine)'=='x86'">
-    <AS>$(SINGULARITY_ROOT)\build\x86_x86\ml.exe</AS>
-    <CC>$(SINGULARITY_ROOT)\build\x86_x86\cl.exe</CC>
-    <LINK>$(SINGULARITY_ROOT)\build\x86_x86\link.exe</LINK>
-    <BLGEN>$(SINGULARITY_ROOT)\build\x86_x86\blgen.exe</BLGEN>
+    <AS>&quot;$(SINGULARITY_ROOT)\build\x86_x86\ml.exe&quot;</AS>
+    <CC>&quot;$(SINGULARITY_ROOT)\build\x86_x86\cl.exe&quot;</CC>
+    <LINK>&quot;$(SINGULARITY_ROOT)\build\x86_x86\link.exe&quot;</LINK>
+    <BLGEN>&quot;$(SINGULARITY_ROOT)\build\x86_x86\blgen.exe&quot;</BLGEN>
     <BOOTDEF>/DBOOT_X86</BOOTDEF>
   </PropertyGroup>
 
@@ -22,7 +22,7 @@
     <AS>$(AS64)</AS>
     <CC>$(CC64)</CC>
     <LINK>$(LINK64)</LINK>
-    <BLGEN>$(SINGULARITY_ROOT)\build\x86_x64\blgen.exe</BLGEN>
+    <BLGEN>&quot;$(SINGULARITY_ROOT)\build\x86_x64\blgen.exe&quot;</BLGEN>
     <BOOTDEF>/DBOOT_X64</BOOTDEF>
   </PropertyGroup>
 
@@ -42,7 +42,7 @@
           Outputs="$(BOOTDIR)\blentry16.com"
           DependsOnTargets="CreateDirs">
 
-    <Exec Command="$(AS16) /nologo $(BOOTDEF) /AT /omf /c /I. /Fl$(BOOTDIR)\blentry16.lst /Fo$(BOOTDIR)\blentry16.obj blentry16.asm"/>
+    <Exec Command="$(AS16) /nologo $(BOOTDEF) /AT /omf /c /I. &quot;/Fl$(BOOTDIR)\blentry16.lst&quot; &quot;/Fo$(BOOTDIR)\blentry16.obj&quot; blentry16.asm"/>
     <Exec WorkingDirectory="$(BOOTDIR)"
           Command="$(LINK16) /nologo /TINY blentry16.obj,blentry16.com,blentry16.map,,,/ONERROR:NOEXE /NOLOGO"/>
   </Target>
@@ -84,12 +84,12 @@
           DependsOnTargets="BuildEntry16;BuildHalclass">
 
     <Exec Condition="'%(BootLoaderSource.Extension)' == '.asm'"
-          Command="$(AS) /nologo /c $(BOOTDEF) /I. /Fl$(BOOTDIR)\%(BootLoaderSource.FileName).lst /Fo$(BOOTDIR)\%(BootLoaderSource.FileName).obj %(BootLoaderSource.Identity)"/>
+          Command="$(AS) /nologo /c $(BOOTDEF) /I. &quot;/Fl$(BOOTDIR)\%(BootLoaderSource.FileName).lst&quot; &quot;/Fo$(BOOTDIR)\%(BootLoaderSource.FileName).obj&quot; %(BootLoaderSource.Identity)"/>
 
     <Exec Condition="'%(BootLoaderSource.Extension)' == '.cpp'"
-          Command="$(CC) /nologo /c $(BOOTDEF) /GF /Gy /Gr /Zi /Os /Oy- /GS- /Gs65536 /FAsc /Fa$(BOOTDIR)\%(BootLoaderSource.FileName).cod /Fo$(BOOTDIR)\%(BootLoaderSource.FileName).obj /Fd$(BOOTDIR)\%(BootLoaderSource.FileName).pdb /I$(KERNEL_NATIVE_DIR) %(BootLoaderSource.Identity)"/>
+          Command="$(CC) /nologo /c $(BOOTDEF) /GF /Gy /Gr /Zi /Os /Oy- /GS- /Gs65536 /FAsc &quot;/Fa$(BOOTDIR)\%(BootLoaderSource.FileName).cod&quot; &quot;/Fo$(BOOTDIR)\%(BootLoaderSource.FileName).obj&quot; &quot;/Fd$(BOOTDIR)\%(BootLoaderSource.FileName).pdb&quot; &quot;/I$(KERNEL_NATIVE_DIR)&quot; %(BootLoaderSource.Identity)"/>
 
-    <Exec Command="$(LINK) /nologo /debug /out:$(BOOTDIR)\bl.exe /pdb:$(BOOTDIR)\bl.pdb /map:$(BOOTDIR)\bl.map @(BootLoaderSource->'$(BOOTDIR)\%(FileName).obj',' ') /nodefaultlib /entry:BlEntry /subsystem:native /base:0x40000 /fixed /ignore:4078 /ignore:4254 /merge:.rdata=.data /merge:.data=.text"/>
+    <Exec Command="$(LINK) /nologo /debug &quot;/out:$(BOOTDIR)\bl.exe&quot; &quot;/pdb:$(BOOTDIR)\bl.pdb&quot; &quot;/map:$(BOOTDIR)\bl.map&quot; @(BootLoaderSource->'&quot;$(BOOTDIR)\%(FileName).obj&quot;',' ') /nodefaultlib /entry:BlEntry /subsystem:native /base:0x40000 /fixed /ignore:4078 /ignore:4254 /merge:.rdata=.data /merge:.data=.text"/>
   </Target>
 
   <Target Name="BuildBootLoader"
@@ -97,7 +97,7 @@
           Outputs="$(BOOTDIR)\Singldr"
           DependsOnTargets="BuildEntry16;BuildEntryFull">
     <Message Text="Building $(BOOTDIR)\Singldr"/>
-    <Exec Command="$(BLGEN) $(BOOTDIR)\blentry16.com $(BOOTDIR)\bl.exe $(BOOTDIR)\Singldr"/>
+    <Exec Command="$(BLGEN) &quot;$(BOOTDIR)\blentry16.com&quot; &quot;$(BOOTDIR)\bl.exe&quot; &quot;$(BOOTDIR)\Singldr&quot;"/>
   </Target>
 
   <Target Name="Clean">
