@@ -1,0 +1,485 @@
+procedure startTimer()
+  requires word(ecx);
+  modifies $Eip, eax, $TimerSeq, $TimerFreq;
+  ensures  TimerOk($TimerSeq) && $TimerFreq == old(ecx);
+{
+  eax := 48;
+  call PitModeOut8(ecx);
+  eax := ecx;
+  call PitFreqOut8();
+  call eax := Shr(eax, 8);
+  call PitFreqOut8();
+}
+
+implementation NucleusEntryPoint($smap:int)
+{
+  var platform:int := ecx;
+
+  eax := 0x12345678;
+  edx := 20;
+  call writeHex();
+
+  eax := platform;
+  edx := 40;
+  call writeHex();
+
+  esi := platform;
+  call eax := RoLoad32(esi + 40);
+  edx := 60;
+  call writeHex();
+
+  esi := platform;
+  call eax := RoLoad32(esi + 44);
+  edx := 80;
+  call writeHex();
+
+  // Load smap count
+  esi := platform;
+  call eax := RoLoad32(esi + 44);
+  if (eax >= 4)
+  {
+    // Found at least 4 smap entries.
+    call edi := RoLoad32(esi + 40);
+
+    // Get smap entry 3
+    call eax := RoLoad32(edi + 72);
+    ebx := eax;
+    edx := 100;
+    call writeHex();
+
+    call eax := RoLoad32(edi + 80);
+    esi := eax;
+    edx := 120;
+    call writeHex();
+
+    call eax := RoLoad32(edi + 88);
+    if (eax == 1)
+    {
+      // Found main memory!
+      //   ?idtLo == ebx
+      //   ?memLo == ?idtHi == ebx + 2048
+      //   ?memHi == ebx + esi
+      var idtLo:int := ebx;
+
+      // Initialize memory
+      ecx := ebx + 2048;
+      edx := ebx + esi;
+      call initSeparation();
+
+      // Switch to nucleus stack
+      esp := DLo;
+
+      // Set up interrupt table
+      var entry@edi := 0;
+      var ptr@esi := idtLo;
+      while (entry < 256)
+        invariant entry >= 0 && TV(entry);
+        invariant ptr == idtLo + 8 * entry;
+        invariant (forall i:int::{TV(i)} TV(i) ==> 0 <= i && i < entry ==>
+                    $IdtMemOk[?idtLo + 8 * i] && $IdtMemOk[?idtLo + 8 * i + 4]);
+      {
+        var handler:int;
+        if      (entry == 0)  { handler := ?FaultHandler; }
+        else {if(entry == 3)  { handler := ?FaultHandler; }
+        else {if(entry == 4)  { handler := ?FaultHandler; }
+        else {if(entry == 13) { handler := ?ErrorHandler; }
+        else {if(entry == 14) { handler := ?ErrorHandler; }
+        else {if(entry < 32)  { handler := ?FatalHandler; }
+        else                  { handler := ?InterruptHandler; }}}}}}
+
+        edx := handler;
+        call edx := And(edx, 0x0000ffff);
+        ecx := 0x20;
+        call ecx := Shl(ecx, 16);
+        call ecx := Or(ecx, edx);
+        assert ecx == or(shl(?CodeSegmentSelector, 16), and(handler, ?Mask16Lo));
+        call IdtStore(entry, 0, handler, ptr, ecx);
+
+        ecx := handler;
+        edx := 0x7fff8000 + 0x7fff8000; // 0xffff0000
+        call ecx := And(ecx, edx);
+        call ecx := Or(ecx, 0x8e00);
+        call IdtStore(entry, 4, handler, ptr + 4, ecx);
+
+        ptr := ptr + 8;
+        entry := entry + 1;
+      }
+
+      // Set IDT register
+      ecx := idtLo;
+      edi := DLo;
+      call ecx := Shl(ecx, 16);
+      call ecx := Or(ecx, 2047);
+      call DStore(edi, ecx);
+      ecx := idtLo;
+      call ecx := Shr(ecx, 16);
+      assert TV(DLo) && TO(1);
+      call DStore(edi + 4, ecx);
+      call Lidt(edi);
+
+      // Set up PIC
+      eax := 0x11; edx := 0x20; call PicOut8(0, 0, 0);
+      eax := 0x11; edx := 0xa0; call PicOut8(1, 0, 0);
+      eax := 0x70; edx := 0x21; call PicOut8(0, 1, 1);
+      eax := 0x78; edx := 0xa1; call PicOut8(1, 1, 1);
+      eax := 0x04; edx := 0x21; call PicOut8(0, 1, 2);
+      eax := 0x02; edx := 0xa1; call PicOut8(1, 1, 2);
+      eax := 0x01; edx := 0x21; call PicOut8(0, 1, 3);
+      eax := 0x01; edx := 0xa1; call PicOut8(1, 1, 3);
+      eax := 0xfe; edx := 0x21; call PicOut8(0, 1, 4);
+      eax := 0xff; edx := 0xa1; call PicOut8(1, 1, 4);
+      eax := 0x20; edx := 0x20; call PicOut8(0, 0, 5);
+      eax := 0x20; edx := 0xa0; call PicOut8(1, 0, 5);
+
+      // Set initial timer
+      ecx := 0;
+      call startTimer();
+
+      // Set state of all managed stacks to empty
+      var s:int := 0;
+      ecx := TLo;
+      while (s < ?NumStacks)
+        invariant s >= 0;
+        invariant ecx == ?tLo + s * ?TSize;
+        invariant Aligned(ecx);
+        invariant (forall $s:int::{TStk($s)} TStk($s) ==> $s < s ==> isStack($s) ==> StackTag($s, $tMems) == ?STACK_EMPTY);
+        invariant MemInv($MemVars);
+      {
+        assert TV(ecx) && TO(2) && TO(64);
+        call TStore(s, ecx, ?STACK_EMPTY);
+        ecx := ecx + ?TSize;
+        s := s + 1;
+      }
+
+      // Initialize GC
+      CurrentStack := ?InitialStack;
+      call InitializeGc();
+
+      // Switch to initial managed stack
+      StackCheck := FLo + ?StackReserve + ?InterruptReserve;
+      assert FLo == ?fLo;
+      esp := FLo + ?FSize - 8;
+      assert TV(FLo) && TO(4094) && TO(4095);
+      edi := TLo;
+      assert TV(TLo) && TO(2);
+
+      ecx := ?KernelEntryPoint;
+      call setStackRunning1(0);
+      ebp := 0;
+
+      call Ret(old($RET)); return;
+    }
+    edx := 140;
+    call writeHex();
+  }
+
+  eax := 0x55550001;
+  call debugBreak();
+
+  // not reached
+  call Ret(old($RET)); return;
+}
+
+implementation FaultHandler($_stackState:[int]StackState, $ebp:int, $esp:int, $eip:int)
+{
+  var $__stackState:[int]StackState := $StackState[$S := StackEmpty];
+  call revealInv1($S, $StackState);
+
+  eax := CurrentStack;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $S);
+
+  call setStackEmpty($S);
+  call revealInv1(?InterruptStack, $__stackState);
+
+  ecx := FLo;
+  call ecx := Add(ecx, ?StackReserve);
+  call ecx := Add(ecx, ?InterruptReserve);
+  StackCheck := ecx;
+
+  ecx := 0;
+  edi := TLo;
+  call ebx := TLoad(?InterruptStack, edi);
+  if (ebx != ?STACK_YIELDED)
+  {
+    // Fatal error: interrupt stack not ready to receive interrupt
+    eax := 0x55550004;
+    call debugBreak();
+  }
+
+  call setStackRunning3(?InterruptStack, $__stackState, $ebp, $esp, $eip);
+  call Ret(old($RET)); return;
+}
+
+implementation ErrorHandler($_stackState:[int]StackState, $ebp:int, $esp:int, $eip:int)
+{
+  var $__stackState:[int]StackState := $StackState[$S := StackEmpty];
+  call revealInv1($S, $StackState);
+
+  eax := CurrentStack;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $S);
+
+  call setStackEmpty($S);
+  call revealInv1(?InterruptStack, $__stackState);
+
+  ecx := FLo;
+  call ecx := Add(ecx, ?StackReserve);
+  call ecx := Add(ecx, ?InterruptReserve);
+  StackCheck := ecx;
+
+  ecx := 0;
+  edi := TLo;
+  call ebx := TLoad(?InterruptStack, edi);
+  if (ebx != ?STACK_YIELDED)
+  {
+    // Fatal error: interrupt stack not ready to receive interrupt
+    eax := 0x55550005;
+    call debugBreak();
+  }
+
+  call setStackRunning3(?InterruptStack, $__stackState, $ebp, $esp, $eip);
+  call Ret(old($RET)); return;
+}
+
+implementation InterruptHandler($_stackState:[int]StackState, $ebp:int, $esp:int, $eip:int)
+{
+  var $__stackState:[int]StackState :=
+    $StackState[$S := StackInterrupted(eax, ebx, ecx, edx, esi, edi, ebp, esp + 12, $Mem[esp], $Mem[esp + 4], $Mem[esp + 8])];
+  call setStackInterrupted();
+  call revealInv1(?InterruptStack, $__stackState);
+
+  ecx := FLo;
+  call ecx := Add(ecx, ?StackReserve);
+  call ecx := Add(ecx, ?InterruptReserve);
+  StackCheck := ecx;
+
+  ecx := 0;
+  edi := TLo;
+  call ebx := TLoad(?InterruptStack, edi);
+  if (ebx != ?STACK_YIELDED)
+  {
+    // Fatal error: interrupt stack not ready to receive interrupt
+    eax := 0x55550006;
+    call debugBreak();
+  }
+
+  call setStackRunning3(?InterruptStack, $__stackState, $ebp, $esp, $eip);
+  call Ret(old($RET)); return;
+}
+
+implementation Throw($_stackState:[int]StackState, $ebp:int, $esp:int, $eip:int)
+{
+  var $__stackState:[int]StackState := $StackState[$S := StackEmpty];
+  call revealInv1($S, $StackState);
+
+  eax := CurrentStack;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $S);
+
+  call setStackEmpty($S);
+  call revealInv1(?InterruptStack, $__stackState);
+
+  ecx := FLo;
+  call ecx := Add(ecx, ?StackReserve);
+  call ecx := Add(ecx, ?InterruptReserve);
+  StackCheck := ecx;
+
+  ecx := 0;
+  edi := TLo;
+  call ebx := TLoad(?InterruptStack, edi);
+  if (ebx != ?STACK_YIELDED)
+  {
+    // Fatal error: interrupt stack not ready to receive interrupt
+    eax := 0x55550003;
+    call debugBreak();
+  }
+
+  call setStackRunning3(?InterruptStack, $__stackState, $ebp, $esp, $eip);
+  call Ret(old($RET)); return;
+}
+
+implementation FatalHandler()
+{
+  eax := 0x55550007;
+  call debugBreak();
+  call Ret(old($RET)); return;
+}
+
+implementation GetStackState($s:int)
+{
+  if (ecx >= ?NumStacks)
+  {
+    eax := 0x55550009;
+    call debugBreak();
+  }
+  call revealInv1($s, $StackState);
+
+  // Get $s state
+  eax := ecx;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $s);
+  call eax := TLoad($s, eax);
+  call Ret(old($RET)); return;
+}
+
+implementation ResetStack($s:int)
+{
+  if (ecx >= ?NumStacks)
+  {
+    eax := 0x55550009;
+    call debugBreak();
+  }
+  call revealInv1($s, $StackState);
+
+  // Get $s state
+  eax := ecx;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $s);
+  call ebx := TLoad($s, eax);
+
+  if (ebx == ?STACK_RUNNING)
+  {
+    // Can't reset our own stack
+    eax := 0x5555000a;
+    call debugBreak();
+  }
+
+  call setStackEmpty($s);
+  call Ret(old($RET)); return;
+}
+
+implementation YieldTo($s:int, $_stackState:[int]StackState,
+            $eax:int, $ebx:int, $ecx:int, $edx:int, $esi:int, $edi:int, $ebp:int, $esp:int,
+            $eip:int, $cs:int, $efl:int)
+{
+  if (ecx >= ?NumStacks)
+  {
+    eax := 0x55550008;
+    call debugBreak();
+  }
+
+  var $__stackState:[int]StackState := $StackState[$S := StackYielded(ebp, esp + 4, $Mem[esp])];
+  call revealInv1($s, $StackState);
+
+  // Set stack check limit
+  eax := ecx;
+  edx := ?FSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, FLo);
+  call eax := Add(eax, ?StackReserve);
+  call eax := Add(eax, ?InterruptReserve);
+  StackCheck := eax;
+
+  // Get $s state
+  eax := ecx;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $s);
+  call ebx := TLoad($s, eax);
+  edi := eax;
+
+  // Prepare to set $S state if necessary
+  eax := CurrentStack;
+  edx := ?TSize;
+  call eax, edx := Mul(eax, edx);
+  call eax := Add(eax, TLo);
+  assert TV(TLo) && TO(64 * $S);
+
+  if (ebx == ?STACK_YIELDED)
+  {
+    call setStackYielded();
+    call setStackRunning3($s, $__stackState, $ebp, $esp, $eip);
+    call Ret(old($RET)); return;
+  }
+  else {if(ebx == ?STACK_INTERRUPTED)
+  {
+    call setStackYielded();
+    call setStackRunning4($s, $__stackState, $eax, $ebx, $ecx, $edx, $esi, $edi, $ebp, $esp, $eip, $cs, $efl);
+    call IRet(old($RET)); return;
+  }
+  else {if(ebx == ?STACK_EMPTY)
+  {
+    call setStackYielded();
+
+    eax := ecx;
+    edx := ?FSize;
+    call eax, edx := Mul(eax, edx);
+    call eax := Add(eax, FLo);
+    assert TV(FLo) && TO($s * 4096 + 4094) && TO($s * 4096 + 4095);
+    call esp := Lea(eax + 16376);
+    eax := ?KernelEntryPoint;
+    call setStackRunning2($s, $__stackState);
+    ebp := 0;
+    call Ret(old($RET)); return;
+  }}}
+  // ebx == ?STACK_RUNNING
+  call Ret(old($RET)); return;
+}
+
+implementation VgaTextWrite()
+{
+  if (ecx < 4000)
+  {
+    call VgaTextStore16(ecx + 1 * ecx + 0xb8000, edx);
+  }
+  call Ret(old($RET)); return;
+}
+
+implementation TryReadKeyboard()
+{
+  call /*eax := */ KeyboardStatusIn8();
+  call eax := And(eax, 1);
+  call Go(); if (eax != 0) { goto skip; }
+    call eax:=Mov(256);
+    call Ret(old($RET)); return;
+  skip:
+  call /*eax := */ KeyboardDataIn8();
+  call eax := And(eax, 255);
+  call Ret(old($RET)); return;
+}
+
+implementation StartTimer()
+{
+  call startTimer();
+  call Ret(old($RET)); return;
+}
+
+implementation SendEoi()
+{
+  var $seq0:int := $PicSeq[0] + 1;
+  var $seq1:int := $PicSeq[1] + 1;
+  eax := 0x20; edx := 0x20; call PicOut8(0, 0, $seq0);
+  eax := 0x20; edx := 0xa0; call PicOut8(1, 0, $seq1);
+  call Ret(old($RET)); return;
+}
+
+implementation CycleCounter()
+{
+  call Rdtsc();
+  call Ret(old($RET)); return;
+}
+
+implementation DebugPrintHex()
+{
+  if (ecx >= 72)
+  {
+    eax := 0x5555000b;
+    call debugBreak();
+  }
+  eax := edx;
+  call edx := Lea(ecx + ecx);
+  call writeHex();
+  call Ret(old($RET)); return;
+}
