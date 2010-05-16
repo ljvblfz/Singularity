@@ -692,7 +692,7 @@ BlAcpiInitialize(
     if (BlAcpiFadt == NULL) {
 
         BlRtlPrintf("ACPI: No FADT!\n");
-        BlRtlHalt();
+        //BlRtlHalt();
     }
 
     BlAcpiMadt = BlAcpiLocateMadt(BlAcpiRsdt);

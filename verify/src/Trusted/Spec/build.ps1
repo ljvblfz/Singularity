@@ -9,13 +9,14 @@ $GcVarsMs = "CurrentStack, `$gcSlice, `$color, StackTop, `$fs, `$fn, CachePtr, C
 
 $AllGcVars = "GcVars, `$stackState, `$r1, `$r2, `$freshAbs, `$Time"
 $FrameVars = "`$FrameCounts, `$FrameAddrs, `$FrameLayouts, `$FrameSlices, `$FrameAbss, `$FrameOffsets"
-$_memVars = "`$sMem, `$dMem, `$tMems, `$fMems, `$gcMem"
-$__MemVars = "SLo, DLo, TLo, FLo, GcLo, GcHi"
+$_memVars = "`$sMem, `$dMem, `$pciMem, `$tMems, `$fMems, `$gcMem"
+$__MemVars = "SLo, DLo, PciLo, TLo, FLo, GcLo, GcHi"
 $MemVars = "`$Mem, $_memVars, $__MemVars"
+$IoVars = "`$IoMmuEnabled, `$PciConfigState, DmaAddr"
 
 function preprocess($GcVars, $s)
 {
-    $s.Replace("AllGcVars", $AllGcVars).Replace("GcVars", $GcVars).Replace("`$FrameVars", $FrameVars).Replace("`$memVars", $_memVars).Replace("`$MemVars", $MemVars).Replace("MemVars", $__MemVars)
+    $s.Replace("AllGcVars", $AllGcVars).Replace("GcVars", $GcVars).Replace("`$FrameVars", $FrameVars).Replace("`$memVars", $_memVars).Replace("`$MemVars", $MemVars).Replace("MemVars", $__MemVars).Replace("`$IoVars", $IoVars)
 }
 
 function _catpp([Parameter(Mandatory=$true)]$GcVars, [Parameter(Mandatory=$true)]$out, [Parameter(Mandatory=$true)][string[]]$in)

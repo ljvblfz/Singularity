@@ -245,3 +245,24 @@ procedure readElementInfo($abs:int, $vt:int);
   ensures esi == arrayElementSize($vt);
   ensures edi == mask(arrayElementClass($vt));
 
+//////////////////////////////////////////////////////////////////////////////
+// STATE
+//////////////////////////////////////////////////////////////////////////////
+
+function IoInv($IoVars:_, $pciMem:[int]int) returns(bool);
+
+function _IoInv($IoVars:_, $pciMem:[int]int) returns(bool)
+{
+    ((DmaAddr == 0 && !$IoMmuEnabled) || (DmaAddr == ?dmaLo && $IoMmuEnabled))
+ && ?dmaLo > 8 && word(?dmaLo - 8)
+ && (forall i:int::{TV(i)} TV(i) ==>
+      0 <= i && i < 65536 ==>
+          ($pciMem[?pciLo + 8 * i] == 0 && $PciConfigState[i] == 0)
+       || ($pciMem[?pciLo + 8 * i] != 0 && $PciConfigState[i] == 4
+            && PciMemAddr(i) == $pciMem[?pciLo + 8 * i]
+            && PciMemSize(i) == $pciMem[?pciLo + 8 * i + 4]))
+}
+
+procedure _ioInv();
+  ensures(forall $IoVars:_, $pciMem:[int]int:: IoInv($IoVars, $pciMem) <==> _IoInv($IoVars, $pciMem));
+

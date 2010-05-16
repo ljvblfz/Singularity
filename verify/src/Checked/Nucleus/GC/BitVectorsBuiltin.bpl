@@ -15,6 +15,14 @@
 
 // \Spec#\bin\Boogie.exe /bv:z /noinfer TrustedBitVectorsBuiltin.bpl VerifiedBitVectorsBuiltin.bpl VerifiedBitVectorsBuiltinImpl.bpl
 
+implementation _aligned($x:bv32)
+{
+}
+
+implementation _zeroAligned()
+{
+}
+
 implementation _andAligned($x:bv32)
 {
 }
@@ -28,6 +36,18 @@ implementation _subAligned($x:bv32, $y:bv32)
 }
 
 implementation _notAligned($b:bv32)
+{
+}
+
+implementation _is4kAligned($x:bv32)
+{
+}
+
+implementation _is2m4kAligned($x:bv32)
+{
+}
+
+implementation _add4kAligned($x:bv32)
 {
 }
 

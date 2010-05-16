@@ -55,6 +55,7 @@ function isReadonlyField(t:int, j:int) returns(bool)
 }
 
 const ?STRING_VTABLE:int;
+const ?BYTE_VECTOR_VTABLE:int;
 
 const ?VT_MASK:int;                axiom ?VT_MASK == 60;
 const ?VT_BASE_LENGTH:int;         axiom ?VT_BASE_LENGTH == 52;

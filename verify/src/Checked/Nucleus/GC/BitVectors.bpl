@@ -123,6 +123,38 @@ procedure __const2()
   call _s(4294967295bv32, 3bv32);
 }
 
+procedure __const3()
+  ensures 4096 == I(4096bv32);
+  ensures 4095 == I(4095bv32);
+{
+  call __const();
+  call _const();
+  assert word(4096);
+  assert word(I(64bv32) * I(64bv32));
+  call _m(64bv32, 64bv32);
+  assert word(4095);
+  call _s(4096bv32, 1bv32);
+}
+
+procedure __const4()
+  ensures 2097152 == I(2097152bv32);
+  ensures 2097151 == I(2097151bv32);
+{
+  call __const();
+  call _const();
+  assert word(2097152);
+  assert word(I(32bv32) * I(65536bv32));
+  call _m(32bv32, 65536bv32);
+  assert word(2097151);
+  call _s(2097152bv32, 1bv32);
+}
+
+implementation __zeroAligned()
+{
+  call __const();
+  call _zeroAligned();
+}
+
 implementation __andAligned($x:int)
 {
   call __const();
@@ -151,6 +183,28 @@ implementation __notAligned($i:int)
   call _notAligned(B($i));
   assert TBV(B($i)) && TBV(4294967292bv32);
   assert $i <= 2147483647 + 2147483647 - 2;
+}
+
+implementation __is4kAligned($x:int)
+{
+  call __const();
+  call __const3();
+  call _is4kAligned(B($x));
+}
+
+implementation __is2m4kAligned($x:int)
+{
+  call __const();
+  call __const3();
+  call __const4();
+  call _is2m4kAligned(B($x));
+}
+
+implementation __add4kAligned($x:int)
+{
+  call __const();
+  call __const3();
+  call _add4kAligned(B($x));
 }
 
 implementation __initialize($unitSize:int, $heapLo:int)

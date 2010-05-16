@@ -74,7 +74,7 @@ procedure RoLoad32($ptr:int) returns ($val:int);
 // valid gc-controlled addresses (must be disjoint from null values)
 // warning: because of interior pointers, ?gcHi must be a 32-bit word
 //   (it can equal 2^32 - 1, but not 2^32)
-const ?gcLo: int; axiom ?gcLo == ?memLo + 1114112;
+const ?gcLo: int; axiom ?gcLo == ?memLo + 1114112 + 8 * 65536;
 const ?gcHi: int; axiom ?gcHi == ?memHi;
 function gcAddr(i:int) returns (bool) {?gcLo <= i && i < ?gcHi}
 function gcAddrEx(i:int) returns (bool) {?gcLo <= i && i <= ?gcHi}

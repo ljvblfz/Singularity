@@ -23,6 +23,9 @@ function bb2vec4(a:[int]int, aBase:int, bb:[int]int, i0:int, i1:int, i2:int, g1:
   )
 }
 
+procedure __zeroAligned();
+  ensures  Aligned(0);
+
 procedure __andAligned($x:int);
   ensures  word($x) ==> (and($x, 3) == 0 <==> Aligned($x));
 
@@ -43,6 +46,22 @@ procedure __notAligned($i:int);
   ensures  word($i + 1);
   ensures  word($i + 2);
   ensures  word($i + 3);
+
+procedure __is4kAligned($x:int);
+  requires word($x) && word($x - 4096);
+  ensures  and($x - and($x, 4095), 4095) == 0;
+  ensures  0 <= and($x, 4095) && and($x, 4095) <= 4095;
+
+procedure __add4kAligned($x:int);
+  requires and($x, 4095) == 0;
+  requires word($x) && word($x + 4096);
+  ensures  and($x + 4096, 4095) == 0;
+  ensures  Aligned($x);
+
+procedure __is2m4kAligned($x:int);
+  requires word($x) && word($x - 2097152) && word($x + 2097152);
+  ensures  and($x + 2097152 - and($x, 2097151), 4095) == 0;
+  ensures  0 <= and($x, 2097151) && and($x, 2097151) <= 2097151;
 
 procedure __initialize($unitSize:int, $heapLo:int);
   requires word($unitSize * 256);

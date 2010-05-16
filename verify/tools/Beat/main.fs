@@ -77,6 +77,13 @@ let map_spec (fe:bexp -> bexp) (l:loc, s:bspec):(loc * bspec) =
   | BModifies xs -> (l, s)
   | BReturns fs -> (l, s)
 
+let subst_id (m:Map<id,bexp>) (x:id):id =
+  if (m.ContainsKey(x)) then
+    match m.[x] with
+    | BVar y -> y
+    | _ -> err "internal substitution error"
+  else x
+
 (* TODO: capture-avoiding substitution *)
 let rec subst_exp (m:Map<id,bexp>) (e:bexp):bexp =
   map_exp
@@ -91,12 +98,10 @@ let rec subst_stmt (m:Map<id,bexp>) (l:loc, s:bstmt):(loc * bstmt) =
     (subst_exp m)
     (fun s ->
       match s with
-      | BAssign (x, e) when m.ContainsKey(x) ->
-        (
-          match m.[x] with
-          | BVar y -> Some (BAssign (y, subst_exp m e))
-          | _ -> err "internal substitution error"
-        )
+      | BAssign (x, e) ->
+          Some (BAssign (subst_id m x, subst_exp m e))
+      | BCall (xs, f, es) ->
+          Some (BCall (List.map (subst_id m) xs, f, List.map (subst_exp m) es))
       | _ -> None)
     (l, s)
 
@@ -128,6 +133,9 @@ let proc_kind (x:id):procKind =
   | "RoLoadU8" | "RoLoadS8" | "RoLoadU16" | "RoLoadS16" | "RoLoad32"
   | "Load" | "SectionLoad"
   | "Store" | "SectionStore" | "VgaTextStore16" | "VgaDebugStore16" | "IdtStore"
+  | "IomStore" | "IomRegLoad" | "IomRegStore"
+  | "PciConfigAddrOut32" | "PciConfigDataIn32" | "PciConfigDataOut32"
+  | "PciMemLoad32" | "PciMemStore32"
   | "Lidt"
   | "KeyboardStatusIn8" | "KeyboardDataIn8"
   | "PicOut8" | "PitModeOut8" | "PitFreqOut8"
@@ -556,6 +564,8 @@ and embellish_stmts (b:bblock):bblock =
   | (l, BCall ([], "GcStore", [a1; a2]))::t -> (l, BCall ([], "gcStore", [a1; a2]))::(l, BCall ([], "Store", [a1; a2]))::(embellish_stmts t)
   | (l, BCall ([x1], "DLoad", [a1]))::t -> (l, BCall ([], "dLoad", [a1]))::(l, BCall ([x1], "Load", [a1]))::(embellish_stmts t)
   | (l, BCall ([], "DStore", [a1; a2]))::t -> (l, BCall ([], "dStore", [a1; a2]))::(l, BCall ([], "Store", [a1; a2]))::(embellish_stmts t)
+  | (l, BCall ([x1], "PciLoad", [a1]))::t -> (l, BCall ([], "pciLoad", [a1]))::(l, BCall ([x1], "Load", [a1]))::(embellish_stmts t)
+  | (l, BCall ([], "PciStore", [a1; a2]))::t -> (l, BCall ([], "pciStore", [a1; a2]))::(l, BCall ([], "Store", [a1; a2]))::(embellish_stmts t)
   | (l, BCall ([x1], "FLoad", [a1; a2]))::t -> (l, BCall ([], "fLoad", [a1; a2]))::(l, BCall ([x1], "Load", [a2]))::(embellish_stmts t)
   | (l, BCall ([], "FStore", [a1; a2; a3]))::t -> (l, BCall ([], "fStore", [a1; a2; a3]))::(l, BCall ([], "Store", [a2; a3]))::(embellish_stmts t)
   | (l, BCall ([x1], "TLoad", [a1; a2]))::t -> (l, BCall ([], "tLoad", [a1; a2]))::(l, BCall ([x1], "Load", [a2]))::(embellish_stmts t)
@@ -571,10 +581,10 @@ and embellish_stmts (b:bblock):bblock =
   | ((l, BCall (_, x, _)) as h)::t when (proc_kind x = PProc) ->
       (l, BCall ([], "_call", []))::(l, BCall ([], "Call", []))::h::(embellish_stmts t)
   | ((l, BReturn) as h)::t ->
-      // call _ret(old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+      // call _ret(old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
       // call Ret(old($RET));
       // return;
-      let h1 = (l, BCall ([], "_ret", [BUop (BOld, BVar "$Mem"); BUop (BOld, BVar "$sMem"); BUop (BOld, BVar "$dMem"); BUop (BOld, BVar "$tMems"); BUop (BOld, BVar "$fMems"); BUop (BOld, BVar "$gcMem")])) in
+      let h1 = (l, BCall ([], "_ret", [BUop (BOld, BVar "$Mem"); BUop (BOld, BVar "$sMem"); BUop (BOld, BVar "$dMem"); BUop (BOld, BVar "$pciMem"); BUop (BOld, BVar "$tMems"); BUop (BOld, BVar "$fMems"); BUop (BOld, BVar "$gcMem")])) in
       let h2 = (l, BCall ([], "Ret", [BUop (BOld, BVar "$RET")])) in
       h1::h2::h::(embellish_stmts t)
   | ((l, BGoto _) as h)::t ->

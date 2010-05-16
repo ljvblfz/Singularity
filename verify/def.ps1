@@ -49,6 +49,11 @@ function needToBuild($out, $ins)
     return $false
 }
 
+function ensureDir($dir)
+{
+    if (-not (test-path $dir)) { mkdir $dir }
+}
+
 function ensureDirForFile($path)
 {
     $dir = [System.IO.Path]::GetDirectoryName($path)
@@ -69,6 +74,7 @@ function _boogie([Parameter(Mandatory=$true)]$out, [Parameter(ValueFromRemaining
         cat "$out.err"
         if(-not (findstr /c:"verified, 0 errors" "$out.err")) {throw "error building $out"}
         if(     (findstr /c:"inconclusive" "$out.err")) {throw "error building $out"}
+        if(     (findstr /c:"time out" "$out.err")) {throw "error building $out"}
         mv -force "$out.err" $out
         "Time: $($time2 - $time1)"
         ""

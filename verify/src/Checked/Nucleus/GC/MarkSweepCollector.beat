@@ -197,16 +197,17 @@ function{:expand false} _StateInv($s:int, $state:StackState, $toAbs:[int]int, $M
           StackCS($s, $tMems, $fMems), StackEfl($s, $tMems, $fMems)))
 }
 
-function _NucleusInv($S:int, $stackState:[int]StackState, $toAbs:[int]int, $AbsMem:[int][int]int, GcVars:_, $MemVars:_, $FrameVars:_) returns(bool)
+function _NucleusInv($S:int, $stackState:[int]StackState, $toAbs:[int]int, $AbsMem:[int][int]int, GcVars:_, $MemVars:_, $FrameVars:_, $IoVars:_) returns(bool)
 {
     __NucleusInv($toAbs, $AbsMem, GcVars, $MemVars, $FrameVars)
  && CurrentStack == $S
  && (forall $s:int::{TStk($s)} TStk($s) ==> isStack($s) ==> _StateInv($s, $stackState[$s], $toAbs, $MemVars, $FrameVars))
+ && IoInv($IoVars, $pciMem)
 }
 
-axiom (forall $S:int, $stackState:[int]StackState, $toAbs:[int]int, $AbsMem:[int][int]int, GcVars:_, $MemVars:_, $FrameVars:_ ::
- NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars) ==
-_NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars));
+axiom (forall $S:int, $stackState:[int]StackState, $toAbs:[int]int, $AbsMem:[int][int]int, GcVars:_, $MemVars:_, $FrameVars:_, $IoVars:_ ::
+ NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars) ==
+_NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars));
 
 function MarkStack(s1:int, s2:int, $toAbs:[int]int, $color:[int]int, stack:[int]int, extra:int) returns(bool)
 {
@@ -1936,7 +1937,7 @@ procedure scanStacks()
              && Aligned(StackEsp($s, $tMems))
              && ScanStackInv($s, $fMems[$s], $FrameVars, StackRA($s, $tMems, $fMems), StackEsp($s, $tMems), StackEbp($s, $tMems)));
   {
-    assert TV(?memLo) && TO(512 + 64 * s) && TO(512 + 64 * s + 1) && TO(512 + 64 * s + 2);
+    assert TV(?memLo) && TO(512 + 65536 * 2 + 64 * s) && TO(512 + 65536 * 2 + 64 * s + 1) && TO(512 + 65536 * 2 + 64 * s + 2);
     var tag:int;
     eax := t;
     call eax := TLoad(s, eax);
@@ -2209,13 +2210,13 @@ procedure AllocBlock($minSize:int, $maxSize:int, $maxWords:int)
 
 procedure allocFromCache($size:int, $nFields:int)
   requires ecx == $size;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires 8 <= $size && $size + 8 <= CacheSize;
   requires $size == 4 * $nFields;
 
   modifies $fs, $fn, $gcMem, $Mem, CacheSize;
   modifies $Eip, eax, edx;
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  $fs[eax] >= $size;
   ensures  HeapLo < eax && eax + $size <= HeapHi;
   ensures  Disconnected(HeapLo, eax, $fs, $fn);
@@ -2241,13 +2242,13 @@ procedure allocFromCache($size:int, $nFields:int)
 
 procedure AllocSlow($size:int, $nFields:int)
   requires ecx == $size;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires 8 <= $size;
   requires $size == 4 * $nFields;
   requires SMemRequireRA(104, $sMem, esp, $RET);
   modifies $fs, $fn, $gcMem, CachePtr, CacheSize;
   modifies $Eip, $RET, eax, ebx, ecx, edx, esi, edi, ebp, esp, $Mem, $sMem;
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax != 0 ==> $fs[eax] >= $size;
   ensures  eax != 0 ==> HeapLo < eax && eax + $size <= HeapHi;
   ensures  eax != 0 ==> Disconnected(HeapLo, eax, $fs, $fn);
@@ -2611,7 +2612,7 @@ procedure Sweep()
 
 procedure _garbageCollect()
   requires StaticInv($toAbs, $SectionMem, $SectionAbs);
-  requires _NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires _NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SMemRequire(108, $sMem, esp);
 
   modifies $r1, $r2, $gcMem, $toAbs, $gcSlice, $color, StackTop;
@@ -2620,7 +2621,7 @@ procedure _garbageCollect()
 
   // postcondition same as precondition, plus reached:
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
-  ensures  _NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  _NucleusInv($S, $stackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  (forall i:int::{TV(i)} TV(i) ==> HeapLo <= i && i < HeapHi && $toAbs[i] != NO_ABS ==>
              reached($toAbs[i], $Time));
   ensures  ebp == old(ebp);
@@ -2664,7 +2665,7 @@ implementation GarbageCollect()
   t := eax;
   t := t + TLo;
   assert t == ?tLo + $S * ?TSize;
-  assert TV(?memLo) && TO(512 + 64 * $S) && TO(512 + 64 * $S + 1) && TO(512 + 64 * $S + 2);
+  assert TV(?memLo) && TO(512 + 65536 * 2 + 64 * $S) && TO(512 + 65536 * 2 + 64 * $S + 1) && TO(512 + 65536 * 2 + 64 * $S + 2);
   ebx := t;
   call TStore($S, ebx, ?STACK_YIELDED);
   call TStore($S, ebx + 4, esp);
@@ -2680,7 +2681,7 @@ implementation GarbageCollect()
   call TStore($S, eax, ?STACK_RUNNING);
 
   esp := sp;
-  call _fret($S, old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+  call _fret($S, old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
   call Ret(old($RET));
   return;
 }
@@ -2692,7 +2693,7 @@ procedure allocObjectMemory($ra:int, $nextFp:int, $size:int, $nFields:int)
   requires FrameNextInv($FrameCounts[$S], $ra, $nextFp, $FrameAddrs[$S], $FrameLayouts[$S]);
   requires StaticInv($toAbs, $SectionMem, $SectionAbs);
   requires GcStackInv($S, $toAbs, $FrameCounts[$S], $FrameAddrs[$S], $FrameLayouts[$S], $FrameSlices[$S], $fMems[$S], $FrameAbss[$S], $FrameOffsets[$S]);
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires 8 <= $size;
   requires $size == 4 * $nFields;
   requires SMemRequire(112, $sMem, esp);
@@ -2703,7 +2704,7 @@ procedure allocObjectMemory($ra:int, $nextFp:int, $size:int, $nFields:int)
 
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  GcStackInv($S, $toAbs, $FrameCounts[$S], $FrameAddrs[$S], $FrameLayouts[$S], $FrameSlices[$S], $fMems[$S], $FrameAbss[$S], $FrameOffsets[$S]);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax != 0 ==> $fs[eax] >= $size;
   ensures  eax != 0 ==> HeapLo < eax && eax + $size <= HeapHi;
   ensures  eax != 0 ==> Disconnected(HeapLo, eax, $fs, $fn);
@@ -3336,6 +3337,10 @@ implementation revealInv1($s:int, $_stackState:[int]StackState)
 {
 }
 
+implementation updateInv1($oldPciConfigState:[int]int, $oldPciMem:[int]int, $oldMem:[int]int)
+{
+}
+
 implementation setStackEmpty($s:int)
 {
   call TStore($s, eax, ?STACK_EMPTY);
@@ -3459,7 +3464,7 @@ procedure _writeStack(
     returns ($_mem:[int]int)
   requires isStack($S) && $StackState[$S] == StackRunning;
   requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $Mem, $memVars, MemVars,
-            $FrameCounts, $FrameAddrs, $FrameLayouts, $FrameSlices, $FrameAbss, $FrameOffsets);
+            $FrameCounts, $FrameAddrs, $FrameLayouts, $FrameSlices, $FrameAbss, $FrameOffsets, $IoVars);
   requires $_frameSlice[$ptr] == $frame;
   requires $ptr == $_frameAddr[$frame] + 4 * $j;
   requires StackLo($S) <= $ptr && $ptr < StackHi($S);
@@ -3552,7 +3557,7 @@ implementation AllocObject($abs:int, $vt:int)
 done:
   ebp := fp;
   esp := sp;
-  call _fret($S, old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+  call _fret($S, old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
   call Ret(old($RET));
   return;
 }
@@ -3596,7 +3601,7 @@ implementation AllocString($abs:int, $vt:int, $nElems:int)
 done:
   ebp := fp;
   esp := sp;
-  call _fret($S, old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+  call _fret($S, old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
   call Ret(old($RET));
   return;
 }
@@ -3639,7 +3644,7 @@ implementation AllocArray($abs:int, $vt:int, $rank:int, $nElems:int)
 done:
   ebp := fp;
   esp := sp;
-  call _fret($S, old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+  call _fret($S, old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
   call Ret(old($RET));
   return;
 }
@@ -3677,7 +3682,7 @@ implementation AllocVector($abs:int, $vt:int, $nElems:int)
 done:
   ebp := fp;
   esp := sp;
-  call _fret($S, old($Mem), old($sMem), old($dMem), old($tMems), old($fMems), old($gcMem));
+  call _fret($S, old($Mem), old($sMem), old($dMem), old($pciMem), old($tMems), old($fMems), old($gcMem));
   call Ret(old($RET));
   return;
 }

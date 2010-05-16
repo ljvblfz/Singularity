@@ -33,6 +33,12 @@ function $bb2vec4(a:[int]int, aBase:int, bb:[int]int, i0:int, i1:int, i2:int, g1
           )))
 }
 
+procedure _aligned($x:bv32);
+  ensures  $Aligned($mul(4bv32, $x));
+
+procedure _zeroAligned();
+  ensures  $Aligned(0bv32);
+
 procedure _andAligned($x:bv32);
   ensures  $and($x, 3bv32) == 0bv32 <==> $Aligned($x);
 
@@ -50,6 +56,19 @@ procedure _notAligned($b:bv32);
   ensures  !$Aligned($add($b, 2bv32));
   ensures  !$Aligned($add($b, 3bv32));
   ensures  $le($b, 4294967292bv32);
+
+procedure _is4kAligned($x:bv32);
+  ensures  $and($sub($x, $and($x, 4095bv32)), 4095bv32) == 0bv32;
+  ensures  $le(0bv32, $and($x, 4095bv32)) && $le($and($x, 4095bv32), 4095bv32);
+
+procedure _add4kAligned($x:bv32);
+  requires $and($x, 4095bv32) == 0bv32;
+  ensures  $and($add($x, 4096bv32), 4095bv32) == 0bv32;
+  ensures  $Aligned($x);
+
+procedure _is2m4kAligned($x:bv32);
+  ensures  $and($sub($add($x, 2097152bv32), $and($x, 2097151bv32)), 4095bv32) == 0bv32;
+  ensures  $le(0bv32, $and($x, 2097151bv32)) && $le($and($x, 2097151bv32), 2097151bv32);
 
 procedure _initialize($unitSize:bv32);
   requires $le($unitSize, 16777215bv32);
@@ -131,8 +150,12 @@ procedure _const();
   ensures $sub(128bv32, 1bv32) == 127bv32;
   ensures $mul(16bv32, 16bv32) == 256bv32;
   ensures $add(256bv32, 256bv32) == 512bv32;
+  ensures $mul(64bv32, 64bv32) == 4096bv32;
+  ensures $sub(4096bv32, 1bv32) == 4095bv32;
   ensures $mul(256bv32, 256bv32) == 65536bv32;
   ensures $sub(65536bv32, 1bv32) == 65535bv32;
+  ensures $mul(65536bv32, 32bv32) == 2097152bv32;
+  ensures $sub(2097152bv32, 1bv32) == 2097151bv32;
   ensures $mul(65536bv32, 256bv32) == 16777216bv32;
   ensures $sub(16777216bv32, 1bv32) == 16777215bv32;
   ensures $mul(65536bv32, 512bv32) == 33554432bv32;

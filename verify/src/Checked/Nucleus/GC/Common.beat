@@ -12,6 +12,9 @@ axiom (forall f:int, j:int, $FrameAddr:[int]int, $FrameSlice:[int]int::
 _InFrameSlice(f, j, $FrameAddr, $FrameSlice) == ($FrameSlice[$FrameAddr[f] + 4 * j] == f));
 implementation _inFrameSlice() {}
 
+axiom (forall $IoVars:_, $pciMem:[int]int:: IoInv($IoVars, $pciMem) == _IoInv($IoVars, $pciMem));
+implementation _ioInv() {}
+
 procedure TableSearch($base:int, $count:int, $x:int)
   requires ecx == $base && edx == $count && ebp == $x;
   requires word(ecx) && word(edx) && word(ebp);

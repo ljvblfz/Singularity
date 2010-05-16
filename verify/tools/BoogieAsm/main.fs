@@ -177,6 +177,11 @@ let load_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand 
   | ([OReg rd], [o2]) -> s_pair (s_reg rd) (mem_operand width o2)
   | _ -> err "unexpected operands"
 
+let iom_reg_load_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand list): string =
+  match (dsts, srcs) with
+  | ([OReg rd], [_; o2]) -> s_pair (s_reg rd) (mem_operand width o2)
+  | _ -> err "unexpected operands"
+
 let store_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand list): string =
   match (dsts, srcs) with
   | ([], [o1; o2]) -> s_pair (mem_operand width o1) (simple_w_operand width o2)
@@ -185,6 +190,11 @@ let store_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand
 let idt_store_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand list): string =
   match (dsts, srcs) with
   | ([], [_; _; _; o1; o2]) -> s_pair (mem_operand width o1) (simple_w_operand width o2)
+  | _ -> err "unexpected operands"
+
+let iom_reg_store_operands (ctxt:string) (width:width) (dsts:operand list) (srcs:operand list): string =
+  match (dsts, srcs) with
+  | ([], [_; o1; o2]) -> s_pair (mem_operand width o1) (simple_w_operand width o2)
   | _ -> err "unexpected operands"
 
 let lidt_operands (ctxt:string) (dsts:operand list) (srcs:operand list): string =
@@ -223,6 +233,9 @@ let print_ins (ctxt:string) (i:string) (dsts:operand list) (srcs:operand list): 
   | "PicOut8" -> print_endline "    out dx, al"
   | "PitModeOut8" -> print_endline "    out 43h, al"
   | "PitFreqOut8" -> print_endline "    out 40h, al"
+  | "PciConfigAddrOut32" -> print_endline "    out dx, eax"
+  | "PciConfigDataOut32" -> print_endline "    out dx, eax"
+  | "PciConfigDataIn32" -> print_endline "    in eax, dx"
   | "RoLoadU8" ->
       print_endline ("    movzx " ^ (load_operands ctxt W8 dsts srcs))
   | "RoLoadS8" ->
@@ -233,11 +246,15 @@ let print_ins (ctxt:string) (i:string) (dsts:operand list) (srcs:operand list): 
       print_endline ("    movsx " ^ (load_operands ctxt W16 dsts srcs))
   | "RoLoad32" | "Load" | "SectionLoad" ->
       print_endline ("    mov " ^ (load_operands ctxt W32 dsts srcs))
+  | "IomRegLoad" | "PciMemLoad32" ->
+      print_endline ("    mov " ^ (iom_reg_load_operands ctxt W32 dsts srcs))
   | "VgaTextStore16" | "VgaDebugStore16" ->
       print_endline ("    mov " ^ (store_operands ctxt W16 dsts srcs))
   | "IdtStore" ->
       print_endline ("    mov " ^ (idt_store_operands ctxt W32 dsts srcs))
-  | "Store" | "SectionStore" ->
+  | "IomRegStore" | "PciMemStore32" ->
+      print_endline ("    mov " ^ (iom_reg_store_operands ctxt W32 dsts srcs))
+  | "Store" | "SectionStore" | "IomStore" ->
       print_endline ("    mov " ^ (store_operands ctxt W32 dsts srcs))
   | "Lidt" -> print_endline ("    lidt " ^ (lidt_operands ctxt dsts srcs))
   | "Lea" -> print_endline ("    lea " ^ (lea_operands ctxt dsts srcs))

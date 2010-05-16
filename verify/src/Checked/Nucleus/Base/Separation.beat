@@ -7,6 +7,7 @@ MemSepInv($MemVars) ==
 (
     (forall i:int::{$Mem[i]}{$sMem[i]} sAddr(i) ==> $Mem[i] == $sMem[i])
  && (forall i:int::{$Mem[i]}{$dMem[i]} dAddr(i) ==> $Mem[i] == $dMem[i])
+ && (forall i:int::{$Mem[i]}{$pciMem[i]} pciAddr(i) ==> $Mem[i] == $pciMem[i])
  && (forall i:int::{$Mem[i]}{$gcMem[i]} gcAddr(i) ==> $Mem[i] == $gcMem[i])
  && (forall s:int, i:int::{$fMems[s][i]} fAddr(s, i) ==> $Mem[i] == $fMems[s][i])
  && (forall s:int, i:int::{$tMems[s][i]} tAddr(s, i) ==> $Mem[i] == $tMems[s][i])
@@ -16,6 +17,7 @@ implementation initSeparation()
 {
   $sMem := $Mem;
   $dMem := $Mem;
+  $pciMem := $Mem;
   $gcMem := $Mem;
   $tMems := MapStacksToMem($Mem);
   $fMems := MapStacksToMem($Mem);
@@ -25,6 +27,9 @@ implementation initSeparation()
   DLo := ecx;
   assert TV(ecx) && TO(256);
   call ecx := AddChecked(ecx, 1024);
+  PciLo := ecx;
+  assert TV(ecx) && TO(2 * 65536);
+  call ecx := AddChecked(ecx, 0x80000);
   TLo := ecx;
   assert TV(ecx) && TO(4096);
   call ecx := AddChecked(ecx, 16384);
@@ -38,6 +43,24 @@ implementation initSeparation()
     eax := 0x55550010;
     call debugBreak();
   }
+
+assert    MemSepInv($MemVars);
+ assert ?gcLo <= ?gcHi;
+ assert Aligned(?sLo);
+ assert Aligned(?dLo);
+ assert Aligned(?pciLo);
+ assert Aligned(?tLo);
+ assert Aligned(?fLo);
+ assert Aligned(?gcLo);
+ assert Aligned(?gcHi);
+ assert SLo == ?sLo;
+ assert DLo == ?dLo;
+ assert PciLo == ?pciLo;
+ assert TLo == ?tLo;
+ assert FLo == ?fLo;
+ assert GcLo == ?gcLo;
+ assert GcHi == ?gcHi;
+
 }
 
 implementation sLoad($ptr:int)
@@ -56,6 +79,15 @@ implementation dLoad($ptr:int)
 implementation dStore($ptr:int, $val:int)
 {
   $dMem[$ptr] := $val;
+}
+
+implementation pciLoad($ptr:int)
+{
+}
+
+implementation pciStore($ptr:int, $val:int)
+{
+  $pciMem[$ptr] := $val;
 }
 
 implementation gcLoad($ptr:int)
@@ -94,10 +126,10 @@ implementation _call()
   $sMem[esp - 4] := NextEip($Eip);
 }
 
-implementation _ret($oldMem:[int]int, $oldSMem:[int]int, $oldDMem:[int]int, $oldTMem:[int][int]int, $oldFMem:[int][int]int, $oldGcMem:[int]int)
+implementation _ret($oldMem:[int]int, $oldSMem:[int]int, $oldDMem:[int]int, $oldPciMem:[int]int, $oldTMem:[int][int]int, $oldFMem:[int][int]int, $oldGcMem:[int]int)
 {
 }
 
-implementation _fret($s:int, $oldMem:[int]int, $oldSMem:[int]int, $oldDMem:[int]int, $oldTMem:[int][int]int, $oldFMem:[int][int]int, $oldGcMem:[int]int)
+implementation _fret($s:int, $oldMem:[int]int, $oldSMem:[int]int, $oldDMem:[int]int, $oldPciMem:[int]int, $oldTMem:[int][int]int, $oldFMem:[int][int]int, $oldGcMem:[int]int)
 {
 }

@@ -6,6 +6,9 @@ $ROOT="."
 
 $NMAKE = "$(ls $BUILD\nmake.exe)"
 
+ensureDir("obj")
+ensureDir("bin")
+
 runShell "cd tools\boogieasm; & `"$NMAKE`" /nologo"
 runShell "cd tools\beat; & `"$NMAKE`" /nologo"
 runShell "cd src\Trusted\Spec; .\build.ps1"
@@ -15,8 +18,8 @@ runShell "cd src\Trusted\BootLoader\BootSectors; & `"$NMAKE`" /nologo"
 
 $doTal = $true
 $TAL_BARTOK = "..\tal\Bartok\bartok.exe"
-$TAL_CHECKER = "..\tal\checker.exe"
-$SPEC_INCLUDE_DIR = "src\Trusted\Spec"
+$TAL_CHECKER = "..\tal\checker\checker.exe"
+$SPEC_INCLUDE_DIR = "src\Trusted\Spec\Tal"
 
 if (-not (test-path $TAL_BARTOK)) { $doTal = $false }
 
@@ -24,28 +27,46 @@ $doGenAsm = $true
 
 if ($doTal) {
   $doGenAsm = $false
-  $SPEC_INCLUDE_DIR = "src\Trusted\Spec\Tal"
 }
 
-$ILASM = "$BUILD\ilasm\ilasm.exe"
 $CSC = "$BUILD\csc.exe"
 $BARTOK = ".\build\x86_x86\Bartok\DEBUG\CLR\bartok.exe"
 $MANAGED_DIR = "obj\Checked\Kernel"
-$MANAGED_CORLIB_DLL = "$MANAGED_DIR\NullCorLib.dll"
-$MANAGED_KERNEL_EXE = "$MANAGED_DIR\Kernel.exe"
-ensureDirForFile($MANAGED_CORLIB_DLL)
+$MANAGED_KERNEL_EXE = "$MANAGED_DIR\kernel.exe"
 ensureDirForFile($MANAGED_KERNEL_EXE)
-run $ILASM /dll src\Trusted\Spec\NullCorLib.il /out:$MANAGED_CORLIB_DLL
-run $CSC /debug /optimize /out:$MANAGED_KERNEL_EXE src\Checked\Kernel\Kernel.cs
+run $CSC /main:Kernel /nostdlib /debug /optimize /nowarn:169 /nowarn:649 /nowarn:3021 /nowarn:626 /nowarn:414 /out:$MANAGED_KERNEL_EXE `
+  src\Checked\Kernel\*.cs `
+  src\Checked\Kernel\Stubs\Stubs.cs `
+  src\Checked\Libraries\System\*.cs `
+  src\Checked\Libraries\System\Runtime\CompilerServices\*.cs `
+  src\Checked\Libraries\System\Runtime\InteropServices\*.cs `
+  src\Checked\Libraries\System\Collections\*.cs `
+  src\Checked\Libraries\System\Text\*.cs `
+  src\Checked\Libraries\System\IO\*.cs `
+  src\Checked\Libraries\System\Globalization\*.cs `
+  src\Checked\Libraries\System\Net\IP\*.cs `
+  src\Checked\Libraries\System\Net\Sockets\*.cs `
+  src\Checked\Libraries\System\Net\*.cs `
+  src\Checked\Libraries\NetStack\Lib\*.cs `
+  src\Checked\Libraries\NetStack\Common\*.cs `
+  src\Checked\Libraries\NetStack\Events\*.cs `
+  src\Checked\Libraries\NetStack2\*.cs `
+  src\Checked\Libraries\NetStack2\TCP\*.cs `
+  src\Checked\Libraries\NetStack2\Protocol\*.cs `
+  src\Checked\Libraries\NetStack2\NetDrivers\*.cs `
+  src\Checked\Libraries\NetStack2\Nic\*.cs `
+  src\Checked\Libraries\NetStack2\Private\*.cs `
+  src\Checked\Drivers\Network\Intel\*.cs `
+
 if ($doTal) {
-  run $TAL_BARTOK /Tal=true /CompileOnly=true /GenObjFile=true  /NullRuntime=true /VerifiedRuntime=true /StackOverflowChecks=true /ABCD=false /IrInitTypeInliner=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /out:$MANAGED_DIR\Kernel.obj $MANAGED_KERNEL_EXE $MANAGED_CORLIB_DLL
+  run $TAL_BARTOK /Tal=true /CompileOnly=true /GenObjFile=true  /NullRuntime=true /StdLibName=kernel /VerifiedRuntime=true /StackOverflowChecks=true /LazyTypeInits=false /ABCD=false /SsaArraySimple=false /IrImproveTypes=false /IrInitTypeInliner=false /IrFindConcrete=false /DevirtualizeCall=false /ConvertUseJumpTablesForSwitch=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /out:$MANAGED_DIR\Kernel.obj $MANAGED_KERNEL_EXE
   run $TAL_CHECKER $MANAGED_DIR\Kernel.obj
 }
 elseif ($doGenAsm) {
-  run     $BARTOK           /CompileOnly=true /GenObjFile=false /NullRuntime=true /VerifiedRuntime=true /StackOverflowChecks=true /ABCD=false /IrInitTypeInliner=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /outdir: $MANAGED_DIR $MANAGED_KERNEL_EXE $MANAGED_CORLIB_DLL
+  run     $BARTOK /Tal=true /CompileOnly=true /GenObjFile=false /NullRuntime=true /StdLibName=kernel /VerifiedRuntime=true /StackOverflowChecks=true /LazyTypeInits=false /ABCD=false /SsaArraySimple=false /IrImproveTypes=false /IrInitTypeInliner=false /IrFindConcrete=false /DevirtualizeCall=false /ConvertUseJumpTablesForSwitch=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /outdir: $MANAGED_DIR $MANAGED_KERNEL_EXE
 }
 else {
-  run     $BARTOK           /CompileOnly=true /GenObjFile=true  /NullRuntime=true /VerifiedRuntime=true /StackOverflowChecks=true /ABCD=false /IrInitTypeInliner=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /outdir: $MANAGED_DIR $MANAGED_KERNEL_EXE $MANAGED_CORLIB_DLL
+  run     $BARTOK /Tal=true /CompileOnly=true /GenObjFile=true  /NullRuntime=true /StdLibName=kernel /VerifiedRuntime=true /StackOverflowChecks=true /LazyTypeInits=false /ABCD=false /SsaArraySimple=false /IrImproveTypes=false /IrInitTypeInliner=false /IrFindConcrete=false /DevirtualizeCall=false /ConvertUseJumpTablesForSwitch=false /NoCalleeSaveRegs=true /ThrowOnInternalError=true /nullgc /centralpt /WholeProgram=true /outdir: $MANAGED_DIR $MANAGED_KERNEL_EXE
 }
 
 $AS = "$BUILD\x86_x86\ml.exe"

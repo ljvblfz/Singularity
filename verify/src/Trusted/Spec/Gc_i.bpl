@@ -37,7 +37,7 @@ procedure GarbageCollect();
   // GC invariant:
   requires word(ebp);
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SpRequire($S, esp, 4);
   requires ReturnToAddr($Mem[esp]) == $RET;
 
@@ -51,7 +51,7 @@ procedure GarbageCollect();
   ensures  SMemEnsure($sMem, old($sMem), esp, old(esp));
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  StackInvS($S, $FrameVars);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  WellFormed($toAbs);
   ensures  ebp == old(ebp);
   ensures  esp == old(esp) + 4;
@@ -60,7 +60,7 @@ procedure GarbageCollect();
 // This procedure executes no instructions (it is not allowed to modify $Eip)
 procedure readField($ptr:int, $fld:int) returns ($val:int);
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires Pointer($toAbs, $ptr, $toAbs[$ptr]);
   requires 0 <= $fld && $fld < numFields($toAbs[$ptr]);
   ensures  gcAddr($ptr + 4 * $fld);
@@ -71,7 +71,7 @@ procedure readField($ptr:int, $fld:int) returns ($val:int);
 // This procedure executes no instructions (it is not allowed to modify $Eip)
 procedure writeField($ptr:int, $fld:int, $val:int, $abs:int) returns ($_mem:[int]int, $_absMem:[int][int]int);
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $Mem, $memVars, MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $Mem, $memVars, MemVars, $FrameVars, $IoVars);
   requires Pointer($toAbs, $ptr, $toAbs[$ptr]);
   requires 0 <= $fld && $fld < numFields($toAbs[$ptr]);
   requires !isReadonlyField(tag($AbsMem[$toAbs[$ptr]][1]), $fld);
@@ -81,13 +81,13 @@ procedure writeField($ptr:int, $fld:int, $val:int, $abs:int) returns ($_mem:[int
   ensures  word($val);
   ensures  $_mem == $Mem[$ptr + 4 * $fld := $val];
   ensures  $_absMem == $AbsMem[$toAbs[$ptr] := $AbsMem[$toAbs[$ptr]][$fld := $abs]];
-  ensures  NucleusInv($S, $StackState, $toAbs, $_absMem, GcVars, $_mem, $memVars, MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $_absMem, GcVars, $_mem, $memVars, MemVars, $FrameVars, $IoVars);
 
 // Prepare to call Load (don't actually call it -- let the mutator call it)
 // This procedure executes no instructions (it is not allowed to modify $Eip)
 procedure readStack($ptr:int, $frame:int, $j:int) returns ($val:int);
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires 0 <= $frame && $frame < $FrameCounts[$S];
   requires $FrameSlices[$S][$ptr] == $frame;
   requires $ptr == $FrameAddrs[$S][$frame] + 4 * $j; // REVIEW: redundant?
@@ -105,7 +105,7 @@ procedure writeStack(
     returns ($_mem:[int]int);
   requires isStack($S) && $StackState[$S] == StackRunning;
   requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $Mem, $memVars, MemVars,
-            $FrameCounts, $FrameAddrs, $FrameLayouts, $FrameSlices, $FrameAbss, $FrameOffsets);
+            $FrameCounts, $FrameAddrs, $FrameLayouts, $FrameSlices, $FrameAbss, $FrameOffsets, $IoVars);
   requires $_frameSlice[$ptr] == $frame;
   requires $ptr == $_frameAddr[$frame] + 4 * $j;
   requires StackLo($S) <= $ptr && $ptr < StackHi($S);
@@ -133,12 +133,13 @@ procedure writeStack(
             $FrameLayouts[$S := $_frameLayout],
             $FrameSlices [$S := $_frameSlice],
             $FrameAbss   [$S := $_frameAbs],
-            $FrameOffsets[$S := $_frameOffset]);
+            $FrameOffsets[$S := $_frameOffset],
+            $IoVars);
 
 procedure AllocObject($abs:int, $vt:int);
   // GC invariant:
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SpRequire($S, esp, 4);
   requires ReturnToAddr($Mem[esp]) == $RET;
 
@@ -166,7 +167,7 @@ procedure AllocObject($abs:int, $vt:int);
   ensures  SMemEnsure($sMem, old($sMem), esp, old(esp));
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  StackInvS($S, $FrameVars);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax == 0 || Pointer($toAbs, eax - 4, $abs);
   ensures  WellFormed($toAbs);
   ensures  ebp == old(ebp);
@@ -175,7 +176,7 @@ procedure AllocObject($abs:int, $vt:int);
 procedure AllocString($abs:int, $vt:int, $nElems:int);
   // GC invariant:
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SpRequire($S, esp, 4);
   requires ReturnToAddr($Mem[esp]) == $RET;
 
@@ -207,7 +208,7 @@ procedure AllocString($abs:int, $vt:int, $nElems:int);
   ensures  SMemEnsure($sMem, old($sMem), esp, old(esp));
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  StackInvS($S, $FrameVars);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax == 0 || Pointer($toAbs, eax - 4, $abs);
   ensures  WellFormed($toAbs);
   ensures  ebp == old(ebp);
@@ -216,7 +217,7 @@ procedure AllocString($abs:int, $vt:int, $nElems:int);
 procedure AllocArray($abs:int, $vt:int, $rank:int, $nElems:int);
   // GC invariant:
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SpRequire($S, esp, 8);
   requires ReturnToAddr($Mem[esp]) == $RET;
   requires $FrameSlices[$S][esp + 4] == $FrameCounts[$S];
@@ -251,7 +252,7 @@ procedure AllocArray($abs:int, $vt:int, $rank:int, $nElems:int);
   ensures  SMemEnsure($sMem, old($sMem), esp, old(esp));
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  StackInvS($S, $FrameVars);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax == 0 || Pointer($toAbs, eax - 4, $abs);
   ensures  WellFormed($toAbs);
   ensures  ebp == old(ebp);
@@ -260,7 +261,7 @@ procedure AllocArray($abs:int, $vt:int, $rank:int, $nElems:int);
 procedure AllocVector($abs:int, $vt:int, $nElems:int);
   // GC invariant:
   requires isStack($S) && $StackState[$S] == StackRunning;
-  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  requires NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   requires SpRequire($S, esp, 4);
   requires ReturnToAddr($Mem[esp]) == $RET;
 
@@ -291,7 +292,7 @@ procedure AllocVector($abs:int, $vt:int, $nElems:int);
   ensures  SMemEnsure($sMem, old($sMem), esp, old(esp));
   ensures  StaticInv($toAbs, $SectionMem, $SectionAbs);
   ensures  StackInvS($S, $FrameVars);
-  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars);
+  ensures  NucleusInv($S, $StackState, $toAbs, $AbsMem, GcVars, $MemVars, $FrameVars, $IoVars);
   ensures  eax == 0 || Pointer($toAbs, eax - 4, $abs);
   ensures  WellFormed($toAbs);
   ensures  ebp == old(ebp);

@@ -2,8 +2,20 @@
 // Copyright (c) Microsoft Corporation.  All rights reserved.
 //
 
+using System.Runtime.CompilerServices;
+using TimeSpan = System.TimeSpan;
+using kernel;
+
+namespace kernel
+{
+
 public abstract class ThreadStart
 {
+    public ThreadStart() {}
+
+    [InterruptsDisabled]
+    public ThreadStart(bool dummy) {}
+
     public abstract void Run();
 }
 
@@ -11,12 +23,18 @@ public class Thread
 {
     internal uint id;
     internal ThreadStart start;
-    internal bool alive = true;
-    internal Thread nextInQueue;
+    internal volatile bool alive = true;
+    internal volatile Thread nextInQueue;
+    internal volatile WakeUp wakeUp; // null if thread not waiting on a timeout
 
-    internal Thread(uint id, ThreadStart start)
+    internal Thread(ThreadStart start)
     {
-        this.id = id;
+        this.start = start;
+    }
+
+    [InterruptsDisabled]
+    internal Thread(ThreadStart start, bool dummy)
+    {
         this.start = start;
     }
 }
@@ -32,20 +50,101 @@ public class Semaphore
         this.capacity = capacity;
     }
 
-    public void Wait()
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
+    internal void WaitInterruptsDisabled()
     {
-        CompilerIntrinsics.Cli();
+        CompilerIntrinsics.Cli(); // TODO: superfluous
         capacity--;
         if (capacity < 0)
         {
             Kernel.kernel.EnqueueAndYield(waiters);
         }
-        CompilerIntrinsics.Sti();
     }
 
-    public void Signal()
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
+    internal bool WaitInterruptsDisabled(WakeUp wakeUp)
     {
-        CompilerIntrinsics.Cli();
+        CompilerIntrinsics.Cli(); // TODO: superfluous
+        capacity--;
+        if (capacity < 0)
+        {
+            if (wakeUp != null)
+            {
+                if (wakeUp.time <= 0) {
+                    return false;
+                }
+                uint cur = Kernel.CurrentThread;
+                wakeUp.thread = Kernel.kernel.threadTable[cur];
+                wakeUp.queue = waiters;
+                wakeUp.thread.wakeUp = wakeUp;
+            }
+            Kernel.kernel.EnqueueAndYield(waiters);
+            if (wakeUp != null)
+            {
+                if (wakeUp.thread.wakeUp == null)
+                {
+                    // We timed out
+                    return false;
+                }
+                wakeUp.thread.wakeUp = null;
+            }
+        }
+        return true;
+    }
+
+    public void Wait()
+    {
+        try
+        {
+            CompilerIntrinsics.Cli();
+            capacity--;
+            if (capacity < 0)
+            {
+                Kernel.kernel.EnqueueAndYield(waiters);
+            }
+        }
+        finally
+        {
+            CompilerIntrinsics.Sti();
+        }
+    }
+
+    [InterruptsDisabled]
+    internal bool TryWaitInterruptsDisabled()
+    {
+        if (capacity <= 0)
+        {
+            return false;
+        }
+        capacity--;
+        return true;
+    }
+
+    public bool TryWait()
+    {
+        try
+        {
+            CompilerIntrinsics.Cli();
+            if (capacity <= 0)
+            {
+                return false;
+            }
+            capacity--;
+            return true;
+        }
+        finally
+        {
+            CompilerIntrinsics.Sti();
+        }
+    }
+
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
+    internal void SignalInterruptsDisabled()
+    {
+        CompilerIntrinsics.Cli(); // TODO: superfluous
         capacity++;
         Thread t = waiters.Dequeue();
         if (t != null)
@@ -54,7 +153,26 @@ public class Semaphore
             ready.Enqueue(t);
             Kernel.kernel.EnqueueAndYield(ready);
         }
-        CompilerIntrinsics.Sti();
+    }
+
+    public void Signal()
+    {
+        try
+        {
+            CompilerIntrinsics.Cli();
+            capacity++;
+            Thread t = waiters.Dequeue();
+            if (t != null)
+            {
+                ThreadQueue ready = Kernel.kernel.readyQueue;
+                ready.Enqueue(t);
+                Kernel.kernel.EnqueueAndYield(ready);
+            }
+        }
+        finally
+        {
+            CompilerIntrinsics.Sti();
+        }
     }
 }
 
@@ -62,8 +180,18 @@ internal class ThreadQueue
 {
     // circular list based on Thread.nextInQueue
     // tail.nextInQueue points to the head
-    internal volatile Thread tail;
+    private volatile Thread tail;
 
+    internal ThreadQueue()
+    {
+    }
+
+    [InterruptsDisabled]
+    internal ThreadQueue(bool dummy)
+    {
+    }
+
+    [InterruptsDisabled]
     internal void Enqueue(Thread t)
     {
         Thread tl = tail;
@@ -81,6 +209,7 @@ internal class ThreadQueue
         }
     }
 
+    [InterruptsDisabled]
     internal Thread Dequeue()
     {
         Thread tl = tail;
@@ -103,255 +232,68 @@ internal class ThreadQueue
             }
         }
     }
-}
 
-public class Shell: ThreadStart
-{
-    Semaphore keyboardWaiter;
-    public uint offset;
-    public Shell(Semaphore keyboardWaiter, uint offset)
+    [InterruptsDisabled]
+    // requires t in queue
+    internal void Remove(Thread t)
     {
-        this.keyboardWaiter = keyboardWaiter;
-        this.offset = offset;
-    }
-
-    public override void Run()
-    {
-        uint b = 0;
-        while (true)
+        Thread tl = tail;
+        Thread i = tl;
+        for (;;)
         {
-            CompilerIntrinsics.Sti();
-            NucleusCalls.DebugPrintHex(offset, b);
-            (new int[1000])[0]++;
-            b++;
-            if (b == 100000)
+            Thread j = i.nextInQueue;
+            if (j == t)
             {
-                b = 0;
-                keyboardWaiter.Wait();
-            }
-        }
-    }
-}
-
-public class KeyboardDriver: ThreadStart
-{
-    Kernel kernel;
-    Semaphore[] listeners;
-
-    public KeyboardDriver(Kernel kernel, Semaphore[] listeners)
-    {
-        this.kernel = kernel;
-        this.listeners = listeners;
-    }
-
-    static BinaryTree t;
-    ThreadStart b1;
-    ThreadStart b2;
-
-    public override void Run()
-    {
-        uint x = 80;
-        uint listener = 0;
-        Semaphore done = kernel.NewSemaphore(0);
-        b1 = new BenchmarkAlloc(done);
-        b2 = new BenchmarkAlloc2(done);
-
-        while (true)
-        {
-            Kernel.kernel.Yield();
-            uint key = NucleusCalls.TryReadKeyboard();
-            if (key == 2)
-            {
-                // '1'
-                kernel.NewThread(
-                    new Kernel.BenchmarkYieldTo(kernel, done, 0));
-                done.Wait();
-            }
-            else if (key == 3)
-            {
-                // '2'
-                kernel.NewThread(
-                    new BenchmarkSemaphore(kernel, done, 0));
-                done.Wait();
-            }
-            else if (key == 4)
-            {
-                // '3'
-                kernel.NewThread(b1);
-                done.Wait();
-            }
-            else if (key == 5)
-            {
-                // '4'
-                kernel.NewThread(b2);
-                done.Wait();
-            }
-            else if (key == 6)
-            {
-                // '5'
-                t = new BinaryTree(23); // 16 * 2^(23+1) = 16 * 16MB = 256MB
-            }
-            else if (key == 7)
-            {
-                // '6'
-                //if (t != null) t.Flip();
-                //t = null;
-            }
-            else if (key < 128)
-            {
-                //NucleusCalls.DebugPrintHex(60, key);
-                NucleusCalls.VgaTextWrite(x, 0x2d00 + key);
-                x++;
-                listeners[listener].Signal();
-                listener++;
-                if (listener == listeners.Length)
+                // remove j
+                i.nextInQueue = j.nextInQueue;
+                if (tail == j)
                 {
-                    listener = 0;
+                    tail = i;
+                    if (i == j)
+                    {
+                        tail = null;
+                    }
                 }
+                return;
             }
         }
     }
 }
 
-public class BenchmarkSemaphore: ThreadStart
+// Records a thread that is blocked (in queue) but will be unblocked at some time
+internal class WakeUp
 {
-    Kernel kernel;
-    Semaphore mySemaphore;
-    Semaphore doneSemaphore; // only set for me == 0
-    int me;
-    BenchmarkSemaphore other;
+    internal long time;
+    internal Thread thread;
+    internal ThreadQueue queue;
 
-    public BenchmarkSemaphore(Kernel kernel, Semaphore doneSemaphore, int me)
+    internal WakeUp(TimeSpan span)
     {
-        this.kernel = kernel;
-        this.doneSemaphore = doneSemaphore;
-        this.me = me;
-        if (me == 0)
-        {
-            other = new BenchmarkSemaphore(kernel, null, 1);
-            other.other = this;
-            mySemaphore = kernel.NewSemaphore(0);
-            other.mySemaphore = kernel.NewSemaphore(0);
-        }
+        this.time = Kernel.GetUtcTime() + span.Ticks;
     }
 
-    public override void Run()
+    internal WakeUp(long time, Thread thread, ThreadQueue queue)
     {
-        int nIter = 1048576;
-        if (me == 0)
-        {
-            kernel.NewThread(other);
-            Semaphore s0 = mySemaphore;
-            Semaphore s1 = other.mySemaphore;
-            kernel.Yield();
-            NucleusCalls.DebugPrintHex(50, 0);
-            long t1 = NucleusCalls.Rdtsc();
-            for (int i = 0; i < nIter; i++)
-            {
-                s1.Signal();
-                s0.Wait();
-            }
-            long t2 = NucleusCalls.Rdtsc();
-            uint diff = (uint)((t2 - t1) >> 20);
-            NucleusCalls.DebugPrintHex(50, diff);
-            doneSemaphore.Signal();
-        }
-        else
-        {
-            Semaphore s1 = mySemaphore;
-            Semaphore s0 = other.mySemaphore;
-            kernel.Yield();
-            for (int i = 0; i < nIter; i++)
-            {
-                s1.Wait();
-                s0.Signal();
-            }
-        }
+        this.time = time;
+        this.thread = thread;
+        this.queue = queue;
     }
 }
-
-public class BenchmarkAlloc: ThreadStart
-{
-    Semaphore doneSemaphore;
-    public BenchmarkAlloc(Semaphore doneSemaphore)
-    {
-        this.doneSemaphore = doneSemaphore;
-    }
-
-    public override void Run()
-    {
-        int nIter = 1048576;
-        NucleusCalls.DebugPrintHex(50, 0);
-        long t1 = NucleusCalls.Rdtsc();
-        for (int i = 0; i < nIter; i++)
-        {
-            new BinaryTree(0);
-        }
-        long t2 = NucleusCalls.Rdtsc();
-        uint diff = (uint)((t2 - t1) >> 20);
-        NucleusCalls.DebugPrintHex(50, diff);
-        doneSemaphore.Signal();
-    }
-}
-
-public class BenchmarkAlloc2: ThreadStart
-{
-    Semaphore doneSemaphore;
-    public BenchmarkAlloc2(Semaphore doneSemaphore)
-    {
-        this.doneSemaphore = doneSemaphore;
-    }
-
-    public override void Run()
-    {
-        int nIter = 65536;
-        NucleusCalls.DebugPrintHex(50, 0);
-        long t1 = NucleusCalls.Rdtsc();
-        for (int i = 0; i < nIter; i++)
-        {
-            (new byte[1000])[0]++;
-        }
-        long t2 = NucleusCalls.Rdtsc();
-        uint diff = (uint)((t2 - t1) >> 16);
-        NucleusCalls.DebugPrintHex(50, diff);
-        doneSemaphore.Signal();
-    }
-}
-
-public class BinaryTree
-{
-    public BinaryTree left, right;
-    public BinaryTree(int depth)
-    {
-        if (depth != 0)
-        {
-            left = new BinaryTree(depth - 1);
-            right = new BinaryTree(depth - 1);
-        }
-    }
-    public void Flip()
-    {
-        BinaryTree t = left;
-        left = right;
-        right = t;
-        if (left != null) left.Flip();
-        if (right != null) right.Flip();
-    }
-}
+} // namespace kernel
 
 public class Kernel
 {
     internal static Kernel kernel;
-    internal static uint CurrentThread;
+    internal static volatile uint CurrentThread;
 
     // Thread 0 is the kernel private thread
     // Threads 1...NUM_THREADS-1 are user threads
     internal const int NUM_THREADS = 64;
     internal Thread[] threadTable = new Thread[Kernel.NUM_THREADS];
     // Threads ready to run:
-    internal ThreadQueue readyQueue = new ThreadQueue();
+    internal ThreadQueue readyQueue = new ThreadQueue(true);
     // Threads waiting to be garbage collected:
-    internal ThreadQueue collectionQueue = new ThreadQueue();
+    internal ThreadQueue collectionQueue = new ThreadQueue(true);
     internal volatile bool collectionRequested;
 
     internal const int STACK_EMPTY = 0;
@@ -359,8 +301,14 @@ public class Kernel
     internal const int STACK_YIELDED = 2;
     internal const int STACK_INTERRUPTED = 3;
 
+    [InterruptsDisabled]
+    private Kernel()
+    {
+    }
+
     // Entry point for initial threads and new threads.
     // The TAL checker verifies that Main has type ()->void and that Main never returns.
+    [RequiresInterruptsDisabled]
     private static void Main()
     {
         uint id = CurrentThread;
@@ -373,23 +321,30 @@ public class Kernel
         {
             kernel.ThreadMain(id);
         }
+        CompilerIntrinsics.Cli(); // TODO: superfluous
         NucleusCalls.DebugPrintHex(0, 0xdead0001);
         while(true) {}
     }
 
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     private void KernelMain()
     {
-        Semaphore[] semaphores = new Semaphore[4];
-        for (int i = 0; i < semaphores.Length; i++) {
-            Semaphore s = new Semaphore(new ThreadQueue(), 0);
-            semaphores[i] = s;
-            _NewThread(new Shell(s, (uint)(10 + 10 * i)));
+        CompilerIntrinsics.Cli(); // TODO: superfluous
+        for (uint i = 0; i < 50 * 80; i++)
+        {
+            NucleusCalls.VgaTextWrite(i, 0);
         }
-        _NewThread(new KeyboardDriver(this, semaphores));
+
+        Thread init = new Thread(new InitThread(), true);
+        _NewThread(init);
+
         uint x = 0xe100;
+        uint y = 0;
         while (true)
         {
-            NucleusCalls.VgaTextWrite(479, x);
+            CompilerIntrinsics.Cli(); // TODO: superfluous
+            NucleusCalls.VgaTextWrite(79, x);
             x++;
 
             // Schedule thread, wait for exception or interrupt
@@ -399,6 +354,7 @@ public class Kernel
             uint cid = CurrentThread;
             Thread t = threadTable[cid];
 
+            CompilerIntrinsics.Cli(); // TODO: superfluous
             uint cState = NucleusCalls.GetStackState(cid);
             if (cState == STACK_EMPTY)
             {
@@ -406,15 +362,19 @@ public class Kernel
                 t.alive = false;
             }
 
+            CompilerIntrinsics.Cli(); // TODO: superfluous
             if (t.alive)
             {
                 // Thread was interrupted.  It's still ready to run.
                 NucleusCalls.SendEoi();
+                CheckWakeUp();
+                CompilerIntrinsics.Cli(); // TODO: superfluous
                 NucleusCalls.StartTimer(0);
                 readyQueue.Enqueue(t);
             }
             else
             {
+                NucleusCalls.VgaTextWrite(78, (uint)(0x5b00 + 0x1100 * (y++) + 48 + cid));
                 // Thread is dead.  Dead threads always jump back to stack 0.
                 threadTable[cid] = null;
                 NucleusCalls.ResetStack(cid);
@@ -422,6 +382,8 @@ public class Kernel
         }
     }
 
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     internal void EnqueueAndYield(ThreadQueue queue)
     {
         uint cid = CurrentThread;
@@ -436,43 +398,62 @@ public class Kernel
 
     // Switch to the next ready thread.
     // (This may be called from stack 0 or from any thread.)
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     internal void ScheduleNextThread()
     {
         Thread t = readyQueue.Dequeue();
+
         if (t == null)
         {
-            NucleusCalls.DebugPrintHex(70, ++gcCount);
-            NucleusCalls.DebugPrintHex(60, 0);
-            long t1 = NucleusCalls.Rdtsc();
-
-            // No ready threads.
-            // Make anyone waiting for GC ready:
-            while (true)
+            if (collectionRequested)
             {
-                t = collectionQueue.Dequeue();
-                if (t == null)
+                CompilerIntrinsics.Cli(); // TODO: superfluous
+                NucleusCalls.DebugPrintHex(70, ++gcCount);
+                NucleusCalls.DebugPrintHex(60, 0);
+                long t1 = NucleusCalls.Rdtsc();
+
+                // No ready threads.
+                // Make anyone waiting for GC ready:
+                while (true)
                 {
-                    break;
+                    t = collectionQueue.Dequeue();
+                    if (t == null)
+                    {
+                        break;
+                    }
+                    readyQueue.Enqueue(t);
                 }
-                readyQueue.Enqueue(t);
+
+                t = readyQueue.Dequeue();
+
+                // Garbage collect, then we're ready to go.
+                NucleusCalls.GarbageCollect();
+                collectionRequested = false;
+
+                long t2 = NucleusCalls.Rdtsc();
+                uint diff = (uint)((t2 - t1) >> 10);
+                NucleusCalls.DebugPrintHex(60, diff);
             }
 
-            t = readyQueue.Dequeue();
-            if (t == null)
+            while (t == null)
             {
-                // No threads to run.  The system is finished.
-                NucleusCalls.DebugPrintHex(0, 0x76543210);
-                while (true) {}
+                // TODO: let the CPU sleep here
+                // TODO: enable interrupts
+                CompilerIntrinsics.Cli(); // TODO: superfluous
+                if (!CheckWakeUp())
+                {
+                    // No threads to run.  The system is finished.
+                    CompilerIntrinsics.Cli(); // TODO: superfluous
+                    NucleusCalls.DebugPrintHex(0, 0x76543210);
+                    while (true) {}
+                }
+
+                t = readyQueue.Dequeue();
+                CompilerIntrinsics.Cli(); // TODO: superfluous
             }
-
-            // Garbage collect, then we're ready to go.
-            NucleusCalls.GarbageCollect();
-            collectionRequested = false;
-
-            long t2 = NucleusCalls.Rdtsc();
-            uint diff = (uint)((t2 - t1) >> 10);
-            NucleusCalls.DebugPrintHex(60, diff);
         }
+
         // Go to t.
         RunThread(t);
 
@@ -480,6 +461,8 @@ public class Kernel
     }
 
     // Run a thread in a new scheduling quantum.
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     private bool RunThread(Thread t)
     {
         uint id = t.id;
@@ -488,6 +471,37 @@ public class Kernel
         return true;
     }
 
+    [InterruptsDisabled]
+    private bool CheckWakeUp()
+    {
+        long now = GetUtcTimeInterruptsDisabled();
+        bool foundSleeper = false;
+
+        // TODO: more efficient data structure
+        foreach (Thread t in threadTable)
+        {
+            if (t != null)
+            {
+                WakeUp wakeUp = t.wakeUp;
+                if (wakeUp != null)
+                {
+                    foundSleeper = true;
+                    if (now - wakeUp.time >= 0)
+                    {
+                        // time to wake up
+                        wakeUp.queue.Remove(t);
+                        t.wakeUp = null;
+                        readyQueue.Enqueue(t);
+                    }
+                }
+            }
+        }
+
+        return foundSleeper;
+    }
+
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     private void ThreadMain(uint id)
     {
         Thread t = threadTable[id];
@@ -502,13 +516,14 @@ public class Kernel
         while(true) {}
     }
 
-    private Thread _NewThread(ThreadStart start)
+    [InterruptsDisabled]
+    private Thread _NewThread(Thread t)
     {
         for (uint i = 1; i < threadTable.Length; i++)
         {
             if (threadTable[i] == null)
             {
-                Thread t = new Thread(i, start);
+                t.id = i;
                 threadTable[i] = t;
                 readyQueue.Enqueue(t);
                 return t;
@@ -519,201 +534,67 @@ public class Kernel
 
     public Thread NewThread(ThreadStart start)
     {
-        CompilerIntrinsics.Cli();
-        Thread t = _NewThread(start);
-        CompilerIntrinsics.Sti();
-        return t;
+        Thread t = new Thread(start);
+        try
+        {
+            CompilerIntrinsics.Cli();
+            return _NewThread(t);
+        }
+        finally
+        {
+            CompilerIntrinsics.Sti();
+        }
     }
 
     public Semaphore NewSemaphore(int capacity)
     {
-        CompilerIntrinsics.Cli();
-        Semaphore s = new Semaphore(new ThreadQueue(), capacity);
-        CompilerIntrinsics.Sti();
-        return s;
+        return new Semaphore(new ThreadQueue(), capacity);
     }
 
     public void Yield()
     {
-        CompilerIntrinsics.Cli();
-        if (collectionRequested)
+        try
         {
-            EnqueueAndYield(collectionQueue);
+            CompilerIntrinsics.Cli();
+            if (collectionRequested)
+            {
+                EnqueueAndYield(collectionQueue);
+            }
+            else
+            {
+                EnqueueAndYield(readyQueue);
+            }
         }
-        else
+        finally
         {
-            EnqueueAndYield(readyQueue);
+            CompilerIntrinsics.Sti();
         }
-        CompilerIntrinsics.Sti();
     }
 
+    [RequiresInterruptsDisabled]
+    [EnsuresInterruptsDisabled]
     public static void Collect()
     {
-        CompilerIntrinsics.Cli();
         kernel.collectionRequested = true;
         // Wait in the collectionQueue for the next GC.
         kernel.EnqueueAndYield(kernel.collectionQueue);
         // no sti needed here; we're returning to do another allocation anyway
     }
 
-    public class BenchmarkYieldTo: ThreadStart
+    // TODO: calibrate timing
+    [InterruptsDisabled]
+    internal static long GetUtcTimeInterruptsDisabled()
     {
-        Kernel kernel;
-        Semaphore doneSemaphore; // only set for me == 0
-        int me;
-        uint myId; // only set for me == 0
-        BenchmarkYieldTo other;
-
-        public BenchmarkYieldTo(Kernel kernel, Semaphore doneSemaphore, int me)
-        {
-            this.kernel = kernel;
-            this.doneSemaphore = doneSemaphore;
-            this.me = me;
-            if (me == 0)
-            {
-                other = new BenchmarkYieldTo(kernel, null, 1);
-                other.other = this;
-            }
-        }
-
-        public override void Run()
-        {
-            CompilerIntrinsics.Cli();
-            int nIter = 1048576;
-            if (me == 0)
-            {
-                myId = Kernel.CurrentThread;
-                Thread otherT = kernel._NewThread(other);
-                uint otherId = otherT.id;
-                kernel.Yield();
-                CompilerIntrinsics.Cli();
-                NucleusCalls.DebugPrintHex(50, 0);
-                long t1 = NucleusCalls.Rdtsc();
-                for (int i = 0; i < nIter; i++)
-                {
-                    NucleusCalls.YieldTo(otherId);
-                }
-                long t2 = NucleusCalls.Rdtsc();
-                uint diff = (uint)((t2 - t1) >> 20);
-                NucleusCalls.DebugPrintHex(50, diff);
-                doneSemaphore.Signal();
-            }
-            else
-            {
-                uint otherId = other.myId;
-                kernel.Yield();
-                CompilerIntrinsics.Cli();
-                for (int i = 0; i < nIter; i++)
-                {
-                    NucleusCalls.YieldTo(otherId);
-                }
-            }
-        }
+        CompilerIntrinsics.Cli(); // TODO: superfluous
+        long tsc = NucleusCalls.Rdtsc();
+        return unchecked(tsc >> 8);
     }
 
-    private static void Demo()
+    // TODO: calibrate timing
+    public static long GetUtcTime()
     {
-        (new int[10])[5]++;
-        (new Kernel[7])[3] = null;
-        (new Kernel[7])[6] = new Kernel();
-
-        if (CurrentThread == 0)
-        {
-            uint a = 0;
-            while (true)
-            {
-                NucleusCalls.DebugPrintHex(10, 0xbababeef);
-
-                CurrentThread = 1;
-                NucleusCalls.StartTimer(0);
-                NucleusCalls.YieldTo(CurrentThread);
-                NucleusCalls.SendEoi();
-
-                CurrentThread = 2;
-                NucleusCalls.StartTimer(0);
-                NucleusCalls.YieldTo(CurrentThread);
-                NucleusCalls.SendEoi();
-
-                NucleusCalls.DebugPrintHex(20, 0xbababeee);
-                NucleusCalls.DebugPrintHex(30, a);
-                a++;
-            }
-        }
-        else if (CurrentThread == 1)
-        {
-            uint b = 0;
-            while (true)
-            {
-                CompilerIntrinsics.Sti();
-                NucleusCalls.DebugPrintHex(40, 0xfeedfade);
-                NucleusCalls.DebugPrintHex(50, b);
-                b++;
-            }
-        }
-        else if(CurrentThread == 2)
-        {
-            uint x = 80;
-            while (true)
-            {
-                CompilerIntrinsics.Sti();
-                CompilerIntrinsics.Sti();
-                CompilerIntrinsics.Sti();
-                uint key = NucleusCalls.TryReadKeyboard();
-                if (key < 256)
-                {
-                    NucleusCalls.DebugPrintHex(60, key);
-                    NucleusCalls.VgaTextWrite(x, 0x2d00 + key);
-                    x++;
-                }
-            }
-        }
-        else
-        {
-            throw null;
-        }
+        long tsc = INucleusCalls.Rdtsc();
+        return unchecked(tsc >> 8);
     }
 }
 
-class NucleusCalls
-{
-    // These declarations are double-checked by the TAL checker
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static uint GetStackState(uint stackId);
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void ResetStack(uint stackId);
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void YieldTo(uint stackId);
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void GarbageCollect();
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void VgaTextWrite(uint position, uint data);
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static uint TryReadKeyboard();
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void StartTimer(uint freq);
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void SendEoi();
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static long Rdtsc();
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void DebugPrintHex(uint screenOffset, uint hexMessage);
-}
-
-class CompilerIntrinsics
-{
-    // These declarations are used by the (untrusted) C# compiler
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void Cli();
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.InternalCall)]
-    internal extern static void Sti();
-}

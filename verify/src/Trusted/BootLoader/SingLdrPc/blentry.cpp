@@ -252,7 +252,7 @@ BlEntry(
     //
 
     BlRtlPrintf("Looking for debugger.\n");
-    BlKdInitialize();
+//    BlKdInitialize();
 
     //
     // Print the welcome banner.
