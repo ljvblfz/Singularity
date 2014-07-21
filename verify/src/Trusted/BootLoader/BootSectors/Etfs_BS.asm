@@ -120,6 +120,7 @@ FoundJoliet:
 
 Step6:    ; Load the Root Directory (SVD), and search it for SINGLDR
     movzx   ebx, [BlockSize]
+    mov     edx, 0
     div     ebx                     ; eax has # blocks in root directory.  Round up if necessary:
     cmp     edx, 0
     je      ReadyToLoad
@@ -173,6 +174,7 @@ Step7:    ; Load the file to 57c0:0000
     mov     cx, 057c0h
     mov     es, cx
     movzx   ebx, [BlockSize]
+    mov     edx, 0
     div     ebx                     ; eax has # blocks in root directory
     cmp     edx, 0                  ; on carry, there will be one more block
     je      ReadyToLoadFile
