@@ -1,0 +1,3 @@
+
+ghost function ConsumesEntropy(in_entropy:seq<int>) : out_entropy:seq<int>
+
